@@ -25,6 +25,17 @@ const UNIFIED: View = { kind: "unified", title: "Inbox" };
 // replace.
 const NATIVE = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/**
+ * How often to look for a new release.
+ *
+ * Five minutes is far more often than a release actually appears, but the cost
+ * is one small request and the polling stops for good as soon as it finds
+ * something — so the upper bound on wasted work is a day of cheap 404s, and
+ * the payoff is that an update is already downloaded and waiting whenever you
+ * next quit, rather than only if you happened to launch after it shipped.
+ */
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -285,20 +296,31 @@ export default function App() {
   // already asked for by installing it.
   useEffect(() => {
     let pending: Update | null = null;
+    let checking = false;
     let cancelled = false;
 
-    void (async () => {
+    async function poll() {
+      // Nothing to look for once something is downloaded and waiting: another
+      // check would find the same release and re-download it. This is also
+      // what bounds the polling — it stops on its own the moment it succeeds.
+      if (pending || checking || cancelled) return;
+      checking = true;
       try {
         const update = await check();
         if (!update || cancelled) return;
         await update.download();
-        pending = update;
+        if (!cancelled) pending = update;
       } catch {
         // A failed check is not worth reporting: offline, a rate limit, no
-        // release published yet. It tries again next launch, and in the
+        // release published yet. It tries again on the next tick, and in the
         // meantime the copy you have works fine.
+      } finally {
+        checking = false;
       }
-    })();
+    }
+
+    void poll();
+    const timer = setInterval(() => void poll(), UPDATE_CHECK_INTERVAL_MS);
 
     const stopping = getCurrentWindow().onCloseRequested(async (event) => {
       if (!pending) return;
@@ -319,6 +341,7 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      clearInterval(timer);
       void stopping.then((stop) => stop());
     };
   }, []);
