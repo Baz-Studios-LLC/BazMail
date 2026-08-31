@@ -20,3 +20,8 @@ config.json
 # Generated design canvas: 2.5 MB of editor payload re-seeded from the
 # .dc.html sources beside it, which are the actual content.
 design/bazmail.html
+
+# Consortium creates a room state directory in whatever directory it is run
+# from. It is scratch belonging to another tool, not to this repo.
+.consortium/
+.tmp-consortium-probe/
