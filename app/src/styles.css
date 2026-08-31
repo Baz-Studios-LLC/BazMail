@@ -842,7 +842,9 @@ body.resizing * {
 
 .btn-primary:disabled {
   opacity: 0.45;
-  cursor: default;
+  /* not-allowed rather than default: it says the button is refusing on
+     purpose, where a plain arrow just looks like nothing happened. */
+  cursor: not-allowed;
 }
 
 .btn-quiet {

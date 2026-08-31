@@ -57,8 +57,23 @@ export function Compose({ accounts, draft, onClose, onSent }: ComposeProps) {
   const account = accounts.find((a) => a.id === form.accountId) ?? accounts[0];
   const recipients = parseRecipients(form.to);
   const bad = recipients.filter((r) => !looksLikeAddress(r.email));
-  const canSend =
-    recipients.length > 0 && bad.length === 0 && !sending && account != null;
+  /**
+   * Why Send is unavailable, or null when it is not.
+   *
+   * A greyed-out button with no explanation reads as broken rather than as
+   * waiting. The reason and the disabled state are derived from the same value
+   * here, so they cannot disagree with each other.
+   */
+  const blocker =
+    account == null
+      ? "Connect an account before sending."
+      : recipients.length === 0
+        ? "Add someone to send to."
+        : bad.length > 0
+          ? `${bad.map((b) => b.email).join(", ")} does not look like an address.`
+          : null;
+
+  const canSend = blocker == null && !sending;
 
   function set<K extends keyof Draft>(key: K, value: Draft[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -93,7 +108,12 @@ export function Compose({ accounts, draft, onClose, onSent }: ComposeProps) {
       onBack={onClose}
       backLabel="Discard and go back"
       actions={
-        <button className="btn-primary" disabled={!canSend} onClick={() => void send()}>
+        <button
+          className="btn-primary"
+          disabled={!canSend}
+          title={blocker ?? "Send this message"}
+          onClick={() => void send()}
+        >
           {sending ? "Sending…" : "Send"}
         </button>
       }
@@ -158,16 +178,14 @@ export function Compose({ accounts, draft, onClose, onSent }: ComposeProps) {
           onChange={(e) => set("text", e.target.value)}
         />
 
-        {bad.length > 0 && (
-          <div className="setup-aside fact-warn">
-            {bad.map((b) => b.email).join(", ")} does not look like an address.
-          </div>
-        )}
-
-
-        <p className="setup-aside">
-          Plain text for now. It goes out through {account?.identity ?? "your account"} and
-          is filed in Sent once the server accepts it.
+        {/* One line, always present: either why Send is refusing, or what will
+            happen when you press it. Two separate hints could contradict each
+            other, and an empty space says nothing at all. */}
+        <p className={blocker ? "setup-aside fact-warn" : "setup-aside"}>
+          {blocker ??
+            `Plain text for now. It goes out through ${
+              account?.identity ?? "your account"
+            } and is filed in Sent once the server accepts it.`}
         </p>
 
         {error && <div className="field-error">{error}</div>}
