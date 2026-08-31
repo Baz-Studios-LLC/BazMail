@@ -14,6 +14,21 @@ export const api = {
   status: () => invoke<Status>("status"),
   syncAll: (limit = 100) => invoke<SyncOutcome[]>("sync_all", { limit }),
   unifiedInbox: (limit = 100) => invoke<Envelope[]>("unified_inbox", { limit }),
+
+  /**
+   * One mailbox out of the mirror. Not the same as filtering the unified
+   * inbox — that narrows to inbox-role mailboxes, so filtering it by Spam or
+   * Archive returns nothing however much has been synced.
+   */
+  mailboxEnvelopes: (mailboxId: string, limit = 200) =>
+    invoke<Envelope[]>("mailbox_envelopes", { mailboxId, limit }),
+
+  /**
+   * Fetches one mailbox from the server. The periodic sync only pulls inboxes,
+   * so every other folder is fetched the first time it is opened.
+   */
+  syncMailbox: (accountId: string, mailboxId: string, limit = 200) =>
+    invoke<number>("sync_mailbox", { accountId, mailboxId, limit }),
   mailboxes: (accountId: string) => invoke<Mailbox[]>("mailboxes", { accountId }),
   body: (accountId: string, emailId: string) =>
     invoke<EmailBody>("body", { accountId, emailId }),

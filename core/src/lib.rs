@@ -438,6 +438,20 @@ impl Engine {
         store.envelopes(&inbox_ids, limit)
     }
 
+    /// Everything the mirror holds for one mailbox, newest first.
+    ///
+    /// Separate from `unified_inbox` because that one deliberately narrows to
+    /// inbox-role mailboxes. Reading a specific mailbox through it and then
+    /// filtering — which is what the UI was doing — can only ever return
+    /// nothing for Spam, Archive or any other folder, since none of their
+    /// messages are in the set it returns in the first place.
+    pub fn mailbox_envelopes(&self, mailbox_id: &str, limit: usize) -> Result<Vec<Envelope>> {
+        self.store
+            .lock()
+            .unwrap()
+            .envelopes(&[mailbox_id.to_string()], limit)
+    }
+
     /// Bodies are fetched on demand and not yet cached — caching them is worth
     /// doing, but only alongside the sanitiser, since an unsanitised body in the
     /// store is a liability we would then have to migrate.

@@ -108,6 +108,15 @@ fn unified_inbox(engine: State<'_, Engine>, limit: usize) -> CmdResult<Vec<Envel
 }
 
 #[tauri::command]
+fn mailbox_envelopes(
+    engine: State<'_, Engine>,
+    mailbox_id: String,
+    limit: usize,
+) -> CmdResult<Vec<Envelope>> {
+    engine.mailbox_envelopes(&mailbox_id, limit).map_err(fail)
+}
+
+#[tauri::command]
 fn mailboxes(engine: State<'_, Engine>, account_id: String) -> CmdResult<Vec<Mailbox>> {
     engine.mailboxes(&account_id).map_err(fail)
 }
@@ -309,6 +318,7 @@ pub fn run() {
             sync_all,
             sync_mailbox,
             unified_inbox,
+            mailbox_envelopes,
             mailboxes,
             body,
             archive,

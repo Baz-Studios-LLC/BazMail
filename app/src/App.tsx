@@ -105,11 +105,14 @@ export default function App() {
 
     if (current.kind === "unified") {
       setEnvelopes(await api.unifiedInbox(200));
+    } else if (current.mailboxId) {
+      // Asked for directly rather than filtered out of the unified set. That
+      // set is inbox-only by design, so narrowing it to Spam or Archive could
+      // never match anything — the folder looked permanently empty while its
+      // unread count, which comes from the server's mailbox list, was right.
+      setEnvelopes(await api.mailboxEnvelopes(current.mailboxId, 300));
     } else {
-      // The store query filters by mailbox; asking for the unified set and
-      // narrowing here keeps one code path until per-mailbox sync exists.
-      const all = await api.unifiedInbox(500);
-      setEnvelopes(all.filter((e) => e.mailboxIds.includes(current.mailboxId ?? "")));
+      setEnvelopes([]);
     }
   }, []);
 
@@ -220,7 +223,24 @@ export default function App() {
       setView(next);
       setSelectedId(null);
       setBody(null);
+      // Whatever the mirror already holds, immediately — the network comes
+      // after, so opening a folder never waits on it.
       await loadFromStore(next, accounts);
+
+      // Only inboxes are pulled by the periodic sync, because syncing every
+      // folder on every account would make startup cost far more than it is
+      // worth. Everything else is fetched the first time you look at it, which
+      // is why Spam stayed empty: nothing had ever asked for it.
+      if (next.kind !== "mailbox" || !next.accountId || !next.mailboxId) return;
+      try {
+        setSyncing(true);
+        await api.syncMailbox(next.accountId, next.mailboxId, 200);
+        await loadFromStore(next, accounts);
+      } catch (e) {
+        setNote(String(e));
+      } finally {
+        setSyncing(false);
+      }
     },
     [accounts, loadFromStore],
   );
