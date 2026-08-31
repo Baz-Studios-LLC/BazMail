@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { useUpdater } from "./useUpdater";
+import { Resizer, clampListWidth, LIST_DEFAULT } from "./components/Resizer";
 import type { Account, EmailBody, Envelope, Mailbox, Status } from "./types";
 import { Sidebar, type View } from "./components/Sidebar";
 import { MessageList } from "./components/MessageList";
@@ -55,6 +56,14 @@ export default function App() {
   // reshuffle underneath you and archived mail keeps its account.
   const [reconnecting, setReconnecting] = useState<Account | null>(null);
   const { state: updateState, checkNow } = useUpdater();
+  // Remembered across restarts: a column width is a preference, and
+  // re-dragging it every launch would make it a chore instead.
+  const [listWidth, setListWidth] = useState(() => {
+    const stored = Number(localStorage.getItem("bazmail.listWidth"));
+    return Number.isFinite(stored) && stored > 0
+      ? clampListWidth(stored)
+      : LIST_DEFAULT;
+  });
 
   /**
    * Renews an account's credential in place.
@@ -369,7 +378,10 @@ export default function App() {
       />
 
       <div className="pane">
-      <div className="card">
+      {/* The list's width is set here rather than in the stylesheet so the
+          drag has one number to move, and the card is what carries it because
+          the strip sits between two of its children. */}
+      <div className="card" style={{ "--list-width": `${listWidth}px` } as React.CSSProperties}>
         <MessageList
           title={view.title}
           envelopes={visibleEnvelopes}
@@ -382,6 +394,12 @@ export default function App() {
             setUnreadOnly(next);
             localStorage.setItem("bazmail.unreadOnly", String(next));
           }}
+        />
+
+        <Resizer
+          width={listWidth}
+          onChange={setListWidth}
+          onCommit={(w) => localStorage.setItem("bazmail.listWidth", String(w))}
         />
 
         <section className="reader">

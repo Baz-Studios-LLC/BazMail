@@ -281,23 +281,13 @@ pub fn run() {
                 .cloned()
                 .ok_or("no window is configured")?;
 
-            // macOS keeps its own title bar. Drawing imitation traffic lights
-            // is always slightly wrong — the spacing, the hover behaviour, the
-            // full-screen affordance on the green one — and people reach for
-            // them by muscle memory. Overlay hands them back while still
-            // letting our content run underneath, and native decorations bring
-            // the rounded corners and window shadow with them for free.
-            #[cfg(target_os = "macos")]
-            let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
-                .decorations(true)
-                .title_bar_style(tauri::TitleBarStyle::Overlay)
-                // The title would otherwise print over our own chrome.
-                .hidden_title(true);
-
-            #[cfg(not(target_os = "macos"))]
-            let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
-
-            builder
+            // The macOS title bar is configured in tauri.macos.conf.json, not
+            // here. Turning decorations on after the fact left the native
+            // traffic lights drawn but dead — they need to be part of how the
+            // window is created, not something bolted on once it exists. The
+            // platform config file is merged at build time, so the window is
+            // born with the right style and this code stays platform-free.
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
                 .on_new_window(move |url, _features| {
                     // Only the two web schemes are handed to the OS. A sender
                     // can write file:, javascript: or anything else into an

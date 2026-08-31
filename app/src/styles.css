@@ -83,11 +83,17 @@
   --accent-sel: rgba(91, 124, 250, 0.24);
   --warn: var(--gold);
 
-  /* 80px because macOS centres its traffic lights at 40pt from the window
-     edge, and they are laid out by the system rather than by us. Sizing
-     the rail around them is the one approach that does not fight the OS.
+  /* Sized around the macOS traffic lights rather than the other way round: the
+     system lays them out, and code that repositions them breaks on the next
+     macOS release.
+
+     The group spans roughly 12pt to 64pt from the window edge — button centres
+     at 18/38/58 with a 12pt diameter — so its centre is at 38pt and a 76px
+     rail puts it in the middle. 80px was the first guess, from assuming
+     centres at 20/40/60, and it left about 4px too much on the right.
+
      Applied on every platform: one rail, not a Mac-shaped exception. */
-  --rail-width: 80px;
+  --rail-width: 76px;
   --sidebar-width: 236px;
   --titlebar-height: 30px;
 
@@ -308,6 +314,29 @@ body.mac .rail {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* The grab strip between the list and the reader. Two pixels of visible
+   hairline with a wider invisible target around it, because a border you can
+   see is thinner than a border you can reliably hit. */
+.resizer {
+  flex-shrink: 0;
+  width: 9px;
+  margin: 0 -4px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 3;
+}
+
+.resizer:hover,
+.resizer:active {
+  background: linear-gradient(
+    to right,
+    transparent 3px,
+    color-mix(in srgb, var(--accent) 55%, transparent) 3px,
+    color-mix(in srgb, var(--accent) 55%, transparent) 6px,
+    transparent 6px
+  );
 }
 
 .pane-header {
