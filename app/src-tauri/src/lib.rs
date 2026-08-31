@@ -199,6 +199,15 @@ async fn connect_imap(
 }
 
 #[tauri::command]
+fn set_account_color(
+    engine: State<'_, Engine>,
+    account_id: String,
+    color: String,
+) -> CmdResult<()> {
+    engine.set_account_color(&account_id, &color).map_err(fail)
+}
+
+#[tauri::command]
 async fn mark_read(
     engine: State<'_, Engine>,
     account_id: String,
@@ -286,6 +295,7 @@ pub fn run() {
             mailboxes,
             body,
             archive,
+            set_account_color,
             mark_read,
             unarchive,
             flush_outbox,

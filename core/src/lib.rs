@@ -17,7 +17,9 @@ pub mod secrets;
 pub mod store;
 
 pub use config::{account_id_from_address, AccountConfig, Config, ImapConfig};
-pub use model::{Account, EmailAddress, EmailBody, Envelope, Lane, Mailbox, Mutation};
+pub use model::{
+    Account, Connection, EmailAddress, EmailBody, Envelope, Lane, Mailbox, Mutation,
+};
 
 use anyhow::{anyhow, Result};
 use imap::ImapClient;
@@ -150,8 +152,26 @@ impl Engine {
                 label: a.label.clone(),
                 color: a.color.clone(),
                 identity: a.identity.clone(),
+                connection: if a.imap.is_some() {
+                    Connection::Imap
+                } else if a.client_id.is_some() {
+                    Connection::Oauth
+                } else {
+                    Connection::Token
+                },
             })
             .collect()
+    }
+
+    /// Repaints an account. Provenance colour is the only way to tell two
+    /// accounts apart at a glance in a unified list, so a collision makes the
+    /// unified inbox unreadable — and until now nothing could fix one.
+    pub fn set_account_color(&self, account_id: &str, color: &str) -> Result<()> {
+        self.mutate_config(|config| {
+            if let Some(account) = config.accounts.iter_mut().find(|a| a.id == account_id) {
+                account.color = color.to_string();
+            }
+        })
     }
 
     /// Changes the config and persists it, re-reading from disk first.
@@ -559,6 +579,7 @@ impl Engine {
             label: label.clone(),
             color: color.clone(),
             identity: username.clone(),
+            connection: Connection::Oauth,
         };
 
         self.mutate_config(|config| {
@@ -654,6 +675,7 @@ impl Engine {
             label: label.clone(),
             color: color.clone(),
             identity: username.clone(),
+            connection: Connection::Imap,
         };
 
         self.mutate_config(|config| {

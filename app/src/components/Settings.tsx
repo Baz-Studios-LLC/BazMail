@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../api";
+import { ACCOUNT_COLORS, api } from "../api";
 import type { Account, Status } from "../types";
 import { Panel } from "./Panel";
 
@@ -9,6 +9,8 @@ interface SettingsProps {
   markReadDelay: number;
   onMarkReadDelayChange: (ms: number) => void;
   onAddAccount: () => void;
+  /** Renews an account's credential in place, keeping its id and settings. */
+  onReconnect: (account: Account) => void;
   /** Called after an account is removed so the shell can reload. */
   onChanged: () => void;
   onClose: () => void;
@@ -28,6 +30,7 @@ export function Settings({
   markReadDelay,
   onMarkReadDelayChange,
   onAddAccount,
+  onReconnect,
   onChanged,
   onClose,
 }: SettingsProps) {
@@ -35,6 +38,16 @@ export function Settings({
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function recolor(accountId: string, color: string) {
+    setError(null);
+    try {
+      await api.setAccountColor(accountId, color);
+      onChanged();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   async function remove(accountId: string) {
     setBusy(true);
@@ -65,7 +78,39 @@ export function Settings({
             <span className="account-main">
               <span className="account-label">{account.label}</span>
               <span className="account-identity">{account.identity}</span>
+              {/* Provenance colour is the only thing separating two accounts
+                  at a glance in a unified list, so a collision makes that list
+                  unreadable — and two accounts really can end up the same. */}
+              <span className="swatches account-swatches">
+                {ACCOUNT_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    className={`swatch ${c === account.color ? "selected" : ""}`}
+                    style={{ background: c }}
+                    aria-label={`Use ${c} for ${account.label}`}
+                    title={`Use ${c} for ${account.label}`}
+                    onClick={() => void recolor(account.id, c)}
+                  />
+                ))}
+              </span>
             </span>
+
+            {confirming !== account.id && (
+              <button
+                className="btn-quiet"
+                disabled={busy}
+                title={
+                  account.connection === "oauth"
+                    ? "Approve BazMail again in your browser"
+                    : account.connection === "imap"
+                      ? "Enter the app password again"
+                      : "Paste a new API token"
+                }
+                onClick={() => onReconnect(account)}
+              >
+                Reconnect
+              </button>
+            )}
 
             {confirming === account.id ? (
               <>

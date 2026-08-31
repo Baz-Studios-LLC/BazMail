@@ -1,14 +1,23 @@
 import { useState } from "react";
 import { ACCOUNT_COLORS, api, FASTMAIL_SESSION_URL } from "../api";
-import type { VerifiedAccount } from "../types";
+import type { Account, VerifiedAccount } from "../types";
 import { wordmarkFor } from "../theme";
 import { ProviderPicker } from "./ProviderPicker";
 import { Panel } from "./Panel";
-import type { Provider } from "../providers";
+import { PROVIDERS, type Provider } from "../providers";
 
 interface SignInProps {
   /** How many accounts already exist, so the next colour is a new one. */
   existingCount: number;
+  /**
+   * Colours already in use. Counting accounts was not enough: replacing an
+   * account leaves the count unchanged, so two accounts could be handed the
+   * same colour — and provenance colour is the only thing telling them apart
+   * in a unified list.
+   */
+  usedColors?: string[];
+  /** Set when renewing an existing account rather than adding a new one. */
+  reconnecting?: Account | null;
   onConnected: () => void;
   onCancel?: () => void;
 }
@@ -21,13 +30,24 @@ interface SignInProps {
  * account. Only after that does it reach the OS credential store — the token is
  * never written to config.json, and never leaves this machine.
  */
-export function SignIn({ existingCount, onConnected, onCancel }: SignInProps) {
+export function SignIn({
+  existingCount,
+  usedColors = [],
+  reconnecting = null,
+  onConnected,
+  onCancel,
+}: SignInProps) {
   const [token, setToken] = useState("");
   const [verified, setVerified] = useState<VerifiedAccount | null>(null);
   const [label, setLabel] = useState("");
   const [identity, setIdentity] = useState("");
   const [color, setColor] = useState(
-    ACCOUNT_COLORS[existingCount % ACCOUNT_COLORS.length],
+    // Keep an account's own colour when reconnecting; otherwise take the first
+    // one nobody is using, falling back to the rotation once they run out.
+    () =>
+      reconnecting?.color ??
+      ACCOUNT_COLORS.find((c) => !usedColors.includes(c)) ??
+      ACCOUNT_COLORS[existingCount % ACCOUNT_COLORS.length],
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,8 +56,15 @@ export function SignIn({ existingCount, onConnected, onCancel }: SignInProps) {
   // a headless run — but it is not what anyone should meet first.
   const [showTokenForm, setShowTokenForm] = useState(false);
   // Which host was chosen. Null means the picker is showing.
-  const [provider, setProvider] = useState<Provider | null>(null);
-  const [imapUser, setImapUser] = useState("");
+  const [provider, setProvider] = useState<Provider | null>(() => {
+    // Reconnecting already knows the host, so skip the picker and go straight
+    // to the form that asks for what we genuinely cannot keep: the password.
+    if (reconnecting?.connection !== "imap") return null;
+    const domain = reconnecting.identity.split("@")[1] ?? "";
+    const stem = domain.split(".")[0];
+    return PROVIDERS.find((p) => p.imap && p.id === stem) ?? null;
+  });
+  const [imapUser, setImapUser] = useState(reconnecting?.identity ?? "");
   const [imapPassword, setImapPassword] = useState("");
 
   async function connectImap() {
@@ -128,7 +155,11 @@ export function SignIn({ existingCount, onConnected, onCancel }: SignInProps) {
     >
       <div className="setup">
         <img className="setup-mark" src={wordmarkFor()} alt="BazMail" draggable={false} />
-        <h2>Connect an email account</h2>
+        <h2>
+          {reconnecting
+            ? `Reconnect ${reconnecting.label}`
+            : "Connect an email account"}
+        </h2>
 
         {!verified && !showTokenForm && !provider ? (
           <>

@@ -7,6 +7,12 @@ export interface Account {
   label: string;
   color: string;
   identity: string;
+  /**
+   * How the account authenticates, which decides what reconnecting costs. An
+   * OAuth grant is renewed in the browser with one click; IMAP needs its app
+   * password typed again, because it was never kept anywhere readable.
+   */
+  connection: "oauth" | "imap" | "token";
 }
 
 export interface Mailbox {

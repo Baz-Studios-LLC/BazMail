@@ -49,6 +49,34 @@ export default function App() {
   const [unreadOnly, setUnreadOnly] = useState(
     () => localStorage.getItem("bazmail.unreadOnly") === "true",
   );
+  // The account whose credential is being renewed, if any. Reconnecting is not
+  // adding: the id, label and colour all survive, so the unified list does not
+  // reshuffle underneath you and archived mail keeps its account.
+  const [reconnecting, setReconnecting] = useState<Account | null>(null);
+
+  /**
+   * Renews an account's credential in place.
+   *
+   * A revoked OAuth grant is the common case and costs one click — the browser
+   * opens, you approve, and the same account keeps working. IMAP cannot be
+   * renewed silently because the app password was never kept anywhere it could
+   * be read back, which is the point of storing it in the OS credential store.
+   */
+  async function reconnect(account: Account) {
+    setShowSettings(false);
+    if (account.connection !== "oauth") {
+      setReconnecting(account);
+      setSigningIn(true);
+      return;
+    }
+    try {
+      setNote(`Reconnecting ${account.label} — approve it in your browser.`);
+      await api.connectFastmail(account.color);
+      void bootstrap();
+    } catch (e) {
+      setNote(String(e));
+    }
+  }
   // The last archive, so Z can reverse it. Undo re-issues the opposite move
   // rather than cancelling the queued one, so it works whether or not the
   // archive already reached the server.
@@ -372,17 +400,29 @@ export default function App() {
               }}
               onAddAccount={() => {
                 setShowSettings(false);
+                setReconnecting(null);
                 setSigningIn(true);
               }}
+              onReconnect={(account) => void reconnect(account)}
               onChanged={() => void bootstrap()}
               onClose={() => setShowSettings(false)}
             />
           ) : (signingIn || (status && !status.configured)) ? (
             <SignIn
               existingCount={accounts.length}
-              onCancel={signingIn ? () => setSigningIn(false) : undefined}
+              usedColors={accounts.map((a) => a.color)}
+              reconnecting={reconnecting}
+              onCancel={
+                signingIn
+                  ? () => {
+                      setSigningIn(false);
+                      setReconnecting(null);
+                    }
+                  : undefined
+              }
               onConnected={() => {
                 setSigningIn(false);
+                setReconnecting(null);
                 void bootstrap();
               }}
             />

@@ -126,13 +126,22 @@ impl JmapClient {
             .json(&body)
             .send()
             .await
-            .context("sending JMAP request")?
-            .error_for_status()
-            .context("JMAP request rejected")?
-            .json()
-            .await
-            .context("parsing JMAP response")?;
-        Ok(response)
+            .context("sending JMAP request")?;
+
+        // The body is where the server says *what* it objected to — an unknown
+        // property, an unsupported capability, a malformed argument. Dropping
+        // it and reporting only "rejected" turns a one-line fix into a guessing
+        // game, which is exactly what happened here.
+        let status = response.status();
+        if !status.is_success() {
+            let detail = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<no response body>".into());
+            anyhow::bail!("JMAP request rejected ({status}): {detail}");
+        }
+
+        Ok(response.json().await.context("parsing JMAP response")?)
     }
 
     pub async fn mailboxes(&self, account_id: &str) -> Result<Vec<Mailbox>> {

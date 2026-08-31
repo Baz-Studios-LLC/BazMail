@@ -1098,6 +1098,18 @@ button.avatar-me.open {
   margin: 4px 6px;
 }
 
+/* Swatches inside an account row are a correction, not a primary control, so
+   they sit smaller and quieter than the ones on the sign-in form. */
+.account-swatches {
+  margin-top: 5px;
+  gap: 5px;
+}
+
+.account-swatches .swatch {
+  width: 13px;
+  height: 13px;
+}
+
 /* The unread filter. Quiet until it is on, then it holds the accent — an
    active filter changes what you are looking at, so it has to be obvious that
    the list is not showing everything. */

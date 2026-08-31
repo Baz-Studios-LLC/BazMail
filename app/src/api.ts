@@ -61,6 +61,9 @@ export const api = {
 
   deleteAccount: (accountId: string) =>
     invoke<void>("delete_account", { accountId }),
+
+  setAccountColor: (accountId: string, color: string) =>
+    invoke<void>("set_account_color", { accountId, color }),
 };
 
 /** Fastmail's JMAP discovery endpoint. */

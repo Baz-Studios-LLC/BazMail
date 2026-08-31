@@ -19,6 +19,22 @@ pub struct Account {
     pub color: String,
     /// Address mail is sent from by default.
     pub identity: String,
+    /// How this account authenticates, which decides what reconnecting it
+    /// costs: an OAuth grant can be renewed with one click, while an IMAP
+    /// account needs its app password typed again — we never kept it anywhere
+    /// we could read back.
+    pub connection: Connection,
+}
+
+/// How an account proves who it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Connection {
+    Oauth,
+    Imap,
+    /// A hand-made API token. Cannot be renewed without the user pasting a new
+    /// one, because the token is all we ever had.
+    Token,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
