@@ -15,6 +15,7 @@ futures = "0.3.34"
 getrandom = "0.4.3"
 keyring = "4.2.0"
 mail-parser = "0.11.8"
+mail-send = "0.6.2"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "http2", "form"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

@@ -571,10 +571,9 @@ export default function App() {
               className="btn-primary"
               disabled={accounts.length === 0}
               onClick={() => {
-                // Prefer an account that can actually send, so the common case
-                // is not a compose window that refuses at the last step.
-                const sender =
-                  accounts.find((a) => a.connection !== "imap") ?? accounts[0];
+                // Every account can send now — JMAP through submission, IMAP
+                // through SMTP — so the first one is as good as any.
+                const sender = accounts[0];
                 setShowSettings(false);
                 setSigningIn(false);
                 setDraft({

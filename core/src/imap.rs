@@ -278,6 +278,25 @@ impl ImapClient {
     /// a single destination. Uses UID MOVE (RFC 6851) where the server has it and
     /// falls back to the copy/flag/expunge dance where it does not — the old way
     /// is not atomic, which is why it is the fallback rather than the default.
+    /// Files a copy of a sent message in a mailbox.
+    ///
+    /// SMTP hands a message to a relay and forgets it — nothing on that path
+    /// records that you sent anything. JMAP's submission moves the message into
+    /// Sent as part of accepting it; here the copy is ours to append, or mail
+    /// leaves the machine with no trace of having done so.
+    ///
+    /// Flagged `\Seen` because you wrote it: arriving in Sent as unread would
+    /// put your own outgoing mail in every unread count you own.
+    pub async fn append(&self, mailbox: &str, raw: &[u8]) -> Result<()> {
+        let mut session = self.session().await?;
+        let result = session
+            .append(mailbox, Some(r"(\Seen)"), None, raw)
+            .await
+            .with_context(|| format!("filing the sent copy in {mailbox}"));
+        let _ = session.logout().await;
+        result
+    }
+
     pub async fn move_message(&self, id: &str, destination: &str) -> Result<String> {
         let (mailbox, validity, uid) = parse_message_id(id)?;
         let mut session = self.session().await?;

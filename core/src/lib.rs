@@ -14,6 +14,7 @@ pub mod jmap;
 pub mod model;
 pub mod oauth;
 pub mod secrets;
+pub mod smtp;
 pub mod store;
 
 pub use config::{account_id_from_address, AccountConfig, Config, ImapConfig};
@@ -25,6 +26,7 @@ pub use model::{
 use anyhow::{anyhow, Result};
 use imap::ImapClient;
 use jmap::JmapClient;
+use smtp::SmtpClient;
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -36,14 +38,16 @@ use store::Store;
 /// which arm it is talking to — that is the entire point of the adapters.
 enum Backend {
     Jmap(Arc<JmapClient>),
-    Imap(Arc<ImapClient>),
+    /// IMAP reads; SMTP sends. They are two protocols against two hosts, so an
+    /// account reached this way carries both or it can only half work.
+    Imap(Arc<ImapClient>, Arc<SmtpClient>),
 }
 
 impl Backend {
     async fn mailboxes(&self, account_id: &str) -> Result<Vec<Mailbox>> {
         match self {
             Backend::Jmap(c) => c.mailboxes(account_id).await,
-            Backend::Imap(c) => c.mailboxes(account_id).await,
+            Backend::Imap(c, _) => c.mailboxes(account_id).await,
         }
     }
 
@@ -55,14 +59,14 @@ impl Backend {
     ) -> Result<Vec<Envelope>> {
         match self {
             Backend::Jmap(c) => c.envelopes(account_id, mailbox_id, limit).await,
-            Backend::Imap(c) => c.envelopes(account_id, mailbox_id, limit).await,
+            Backend::Imap(c, _) => c.envelopes(account_id, mailbox_id, limit).await,
         }
     }
 
     async fn body(&self, email_id: &str) -> Result<EmailBody> {
         match self {
             Backend::Jmap(c) => c.body(email_id).await,
-            Backend::Imap(c) => c.body(email_id).await,
+            Backend::Imap(c, _) => c.body(email_id).await,
         }
     }
 
@@ -73,7 +77,7 @@ impl Backend {
     async fn set_flags(&self, email_id: &str, add: &[String], remove: &[String]) -> Result<()> {
         match self {
             Backend::Jmap(c) => c.set_keywords(email_id, add, remove).await,
-            Backend::Imap(c) => c.set_flags(email_id, add, remove).await,
+            Backend::Imap(c, _) => c.set_flags(email_id, add, remove).await,
         }
     }
 
@@ -96,14 +100,34 @@ impl Backend {
                 c.send(from, &identity, drafts_mailbox, sent_mailbox, message)
                     .await
             }
-            // Reading and sending are different protocols on this path: IMAP
-            // has no send verb at all, and the SMTP client that would provide
-            // one does not exist yet. Saying so plainly beats failing somewhere
-            // deeper with something that reads like a bug.
-            Backend::Imap(_) => anyhow::bail!(
-                "this account reads over IMAP, which cannot send — sending needs SMTP, \
-                 and BazMail does not speak it yet"
-            ),
+            Backend::Imap(imap, smtp) => {
+                // Built once and used twice, so what lands in Sent is byte for
+                // byte what the recipient got. Composing it again for the copy
+                // would give it a different Date and Message-ID — enough to
+                // stop your own replies threading against it.
+                let raw = smtp.compose(from, message)?;
+
+                // Bcc reaches the relay and nothing else: an envelope recipient
+                // here, and deliberately absent from the headers.
+                let recipients: Vec<String> = message
+                    .to
+                    .iter()
+                    .chain(&message.cc)
+                    .chain(&message.bcc)
+                    .map(|a| a.email.clone())
+                    .collect();
+
+                smtp.send(&from.email, &recipients, &raw).await?;
+
+                // Only once the relay has taken it. Filing a copy of something
+                // that was never sent is worse than filing nothing — and a
+                // failure here costs the record, not the mail, so it is
+                // reported rather than turned into a failed send.
+                if let Err(e) = imap.append(sent_mailbox, &raw).await {
+                    eprintln!("sent, but could not file a copy in {sent_mailbox}: {e:#}");
+                }
+                Ok(())
+            }
         }
     }
 
@@ -115,7 +139,7 @@ impl Backend {
     ) -> Result<()> {
         match self {
             Backend::Jmap(c) => c.set_mailboxes(email_id, add, remove).await,
-            Backend::Imap(c) => {
+            Backend::Imap(c, _) => {
                 let destination = add
                     .first()
                     .ok_or_else(|| anyhow!("IMAP needs a destination mailbox to move a message"))?;
@@ -374,12 +398,23 @@ impl Engine {
         }
 
         let backend = if let Some(imap) = account.imap.as_ref() {
-            Arc::new(Backend::Imap(Arc::new(ImapClient::new(
-                imap.host.clone(),
-                imap.port,
-                imap.username.clone(),
-                credential.clone(),
-            ))))
+            // The same credential opens both. Providers issue one app password
+            // per account, not one per protocol, and asking twice for the same
+            // secret would be inventing a distinction the server does not make.
+            Arc::new(Backend::Imap(
+                Arc::new(ImapClient::new(
+                    imap.host.clone(),
+                    imap.port,
+                    imap.username.clone(),
+                    credential.clone(),
+                )),
+                Arc::new(SmtpClient::new(
+                    imap.submission_host(),
+                    imap.submission_port(),
+                    imap.username.clone(),
+                    credential.clone(),
+                )),
+            ))
         } else {
             Arc::new(Backend::Jmap(Arc::new(
                 JmapClient::connect(self.http.clone(), &account.session_url, credential.clone())
@@ -918,6 +953,13 @@ impl Engine {
                     host,
                     port,
                     username,
+                    // Derived from the IMAP host on first use rather than asked
+                    // for at sign-in: every provider names the pair the same
+                    // way, and an extra field nobody can answer is worse than a
+                    // convention that is right almost always and overridable
+                    // when it is not.
+                    smtp_host: None,
+                    smtp_port: None,
                 }),
             })
         })?;

@@ -164,12 +164,6 @@ export function Compose({ accounts, draft, onClose, onSent }: ComposeProps) {
           </div>
         )}
 
-        {account?.connection === "imap" && (
-          <div className="setup-aside fact-warn">
-            {account.label} reads over IMAP, which cannot send. Sending needs
-            SMTP and BazMail does not speak it yet — pick another account.
-          </div>
-        )}
 
         <p className="setup-aside">
           Plain text for now. It goes out through {account?.identity ?? "your account"} and

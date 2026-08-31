@@ -52,6 +52,37 @@ pub struct ImapConfig {
     pub host: String,
     pub port: u16,
     pub username: String,
+    /// Where this account sends. IMAP has no send verb, so an account reached
+    /// this way needs a second host entirely.
+    #[serde(default)]
+    pub smtp_host: Option<String>,
+    #[serde(default)]
+    pub smtp_port: Option<u16>,
+}
+
+impl ImapConfig {
+    /// The submission host, guessed from the IMAP one when it was not given.
+    ///
+    /// Every major provider names them in the same pair — imap.example.com and
+    /// smtp.example.com — so deriving it makes the common case need no extra
+    /// question at sign-in. It is only ever a default: an explicit value in the
+    /// config always wins, because the convention is a convention and not a
+    /// rule.
+    pub fn submission_host(&self) -> String {
+        if let Some(host) = self.smtp_host.as_deref().filter(|h| !h.trim().is_empty()) {
+            return host.to_string();
+        }
+        match self.host.split_once('.') {
+            Some((_, domain)) => format!("smtp.{domain}"),
+            None => self.host.clone(),
+        }
+    }
+
+    /// 587 with STARTTLS is the submission port defined by RFC 6409 and what
+    /// every provider we care about accepts.
+    pub fn submission_port(&self) -> u16 {
+        self.smtp_port.unwrap_or(587)
+    }
 }
 
 impl AccountConfig {
@@ -225,6 +256,34 @@ mod tests {
     }
 
     #[test]
+    fn the_submission_host_is_derived_from_the_imap_one() {
+        let imap = ImapConfig {
+            host: "imap.mail.me.com".into(),
+            port: 993,
+            username: "me@example.com".into(),
+            smtp_host: None,
+            smtp_port: None,
+        };
+        assert_eq!(imap.submission_host(), "smtp.mail.me.com");
+        assert_eq!(imap.submission_port(), 587);
+    }
+
+    #[test]
+    fn an_explicit_submission_host_beats_the_convention() {
+        // The imap./smtp. pairing is a convention, not a rule, so anything
+        // written down has to win over the guess.
+        let imap = ImapConfig {
+            host: "mail.example.com".into(),
+            port: 993,
+            username: "me@example.com".into(),
+            smtp_host: Some("submission.example.com".into()),
+            smtp_port: Some(465),
+        };
+        assert_eq!(imap.submission_host(), "submission.example.com");
+        assert_eq!(imap.submission_port(), 465);
+    }
+
+    #[test]
     fn reconnecting_keeps_a_signature_the_sign_in_flow_never_saw() {
         let mut config = Config::default();
         let mut original = account("example");
@@ -269,6 +328,8 @@ mod tests {
             host: "imap.mail.me.com".into(),
             port: 993,
             username: "me@example.com".into(),
+            smtp_host: None,
+            smtp_port: None,
         });
         config.upsert(a);
         config.save_to(&path).unwrap();

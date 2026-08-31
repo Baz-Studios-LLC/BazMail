@@ -85,9 +85,7 @@ precedence over everything, which is useful for CI.
 
 ## What does not
 
-- **Reply, snooze and compose** are still unbound. The outbox behind archive is
-  the shape they all need, so each is now a much smaller job than the first one
-  was.
+- **Snooze** is still unbound.
 - **No triage lanes yet.** Needs you / Waiting on / FYI are designed but not
   built, so the sidebar shows only what actually works.
 - **No push.** Sync runs once at startup. Real-time needs the JMAP EventSource
