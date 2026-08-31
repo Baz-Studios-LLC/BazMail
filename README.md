@@ -141,6 +141,27 @@ Windows gets an `.msi` and an NSIS `.exe`. macOS gets a universal `.dmg` that
 runs natively on both Apple Silicon and Intel, so there is nothing to choose
 between.
 
+## Updates
+
+BazMail updates itself the way Chrome does: it checks on launch, downloads in
+the background, and applies the update when you next close the app. There is no
+prompt, because installing the app already answered that question.
+
+A build is not an update. CI leaves releases as **drafts**, and the update
+endpoint only resolves published ones, so nothing reaches an installed copy
+until a draft is published deliberately.
+
+Updates are signed with a dedicated key — not a code-signing certificate, but
+the key an installed copy checks before accepting anything. Its public half is
+compiled into the app and its private half lives only in the repository secret
+`TAURI_SIGNING_PRIVATE_KEY`. This is what stops anyone who can spoof the
+endpoint from handing users a binary, so the build deliberately *fails* without
+it rather than shipping unsigned artifacts.
+
+**Losing that private key means every installed copy stops being updatable**,
+with a manual reinstall as the only recovery. It is worth having a copy
+somewhere durable.
+
 ### Nothing is code-signed yet
 
 So both systems will object, and they are right to:
