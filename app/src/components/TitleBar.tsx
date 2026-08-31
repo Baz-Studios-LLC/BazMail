@@ -3,6 +3,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { wordmarkFor } from "../theme";
 
 /**
+ * Read before first paint rather than awaited from a command, because a
+ * platform learned asynchronously means the Windows buttons flash on a Mac for
+ * a frame before disappearing.
+ */
+const IS_MAC = navigator.userAgent.includes("Macintosh");
+
+/**
  * Replaces the native Windows caption.
  *
  * The point is that it carries colour 1, the same surface as the icon rail, so
@@ -11,6 +18,11 @@ import { wordmarkFor } from "../theme";
  *
  * Glyphs are drawn rather than taken from Segoe Fluent Icons so they recolour
  * with the theme and do not depend on a font being present.
+ *
+ * On macOS this keeps only the drag region: the system draws the traffic
+ * lights over our content and owns closing, minimising and full-screen. Fake
+ * ones are always subtly wrong, and this is the one piece of chrome everybody
+ * reaches for without looking.
  */
 export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
@@ -29,7 +41,7 @@ export function TitleBar() {
   }, [win]);
 
   return (
-    <div className="titlebar">
+    <div className={`titlebar ${IS_MAC ? "mac" : ""}`}>
       {/* Everything except the buttons drags the window. */}
       <div className="titlebar-drag" data-tauri-drag-region>
         <img
@@ -41,6 +53,7 @@ export function TitleBar() {
         />
       </div>
 
+      {!IS_MAC && (
       <div className="win-controls">
         <button
           className="win-btn"
@@ -79,6 +92,7 @@ export function TitleBar() {
           </svg>
         </button>
       </div>
+      )}
     </div>
   );
 }

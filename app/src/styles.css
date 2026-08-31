@@ -156,6 +156,12 @@ button {
    * pushed past the caption strip to line up with the sidebar's first row.
    * Tracks the caption height rather than hard-coding a number. */
   padding: calc(var(--titlebar-height) + 12px) 0 12px;
+}
+
+/* Matches .titlebar.mac's taller strip, so the first rail icon still lines up
+   with the sidebar's first row and sits clear of the traffic lights. */
+body.mac .rail {
+  padding-top: 50px;
   gap: 3px;
 }
 
@@ -634,6 +640,22 @@ button {
   display: flex;
   align-items: center;
   min-width: 0;
+}
+
+/* macOS draws its traffic lights over the top-left of the window, which is the
+   rail's territory — and they span about 70px against a 46px rail, so they
+   reach into the sidebar too. The caption strip grows to clear them
+   vertically, and the wordmark starts past them horizontally.
+
+   Everything here is scoped to .mac: on Windows we still draw the whole
+   caption ourselves and none of this applies. */
+.titlebar.mac {
+  height: 38px;
+}
+
+.titlebar.mac .titlebar-drag {
+  /* The rail already accounts for the first 46px of the window. */
+  padding-left: 30px;
 }
 
 .titlebar-name {
