@@ -307,7 +307,9 @@ body.mac .rail {
 }
 
 .list {
-  width: 366px;
+  /* Set by the drag handle on .card, which this inherits. The fallback is what
+     the app opens with before anyone has moved it. */
+  width: var(--list-width, 366px);
   flex-shrink: 0;
   background: var(--list-grad);
   border-right: 1px solid var(--hairline);
