@@ -1098,6 +1098,43 @@ button.avatar-me.open {
   margin: 4px 6px;
 }
 
+/* The account context menu. Anchored under the group header rather than at the
+   pointer: the sidebar is narrow, and a menu that follows the cursor lands
+   half off the edge as often as not. */
+.account-menu {
+  position: relative;
+  margin: 2px 8px 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--c3);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  z-index: 5;
+}
+
+.account-menu-item {
+  text-align: left;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-mid);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.account-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-hi);
+}
+
+.account-menu-item:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
 /* Swatches inside an account row are a correction, not a primary control, so
    they sit smaller and quieter than the ones on the sign-in form. */
 .account-swatches {

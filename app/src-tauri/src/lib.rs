@@ -199,6 +199,11 @@ async fn connect_imap(
 }
 
 #[tauri::command]
+fn move_account(engine: State<'_, Engine>, account_id: String, up: bool) -> CmdResult<()> {
+    engine.move_account(&account_id, up).map_err(fail)
+}
+
+#[tauri::command]
 fn set_account_color(
     engine: State<'_, Engine>,
     account_id: String,
@@ -296,6 +301,7 @@ pub fn run() {
             body,
             archive,
             set_account_color,
+            move_account,
             mark_read,
             unarchive,
             flush_outbox,

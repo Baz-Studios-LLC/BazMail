@@ -163,6 +163,30 @@ impl Engine {
             .collect()
     }
 
+    /// Moves an account one place up or down the sidebar.
+    ///
+    /// Order lives in the config array itself rather than in a separate rank
+    /// column: there is exactly one list, it is short, and a swap of adjacent
+    /// entries cannot produce the duplicate or missing ranks that a numeric
+    /// ordering eventually does.
+    pub fn move_account(&self, account_id: &str, up: bool) -> Result<()> {
+        self.mutate_config(|config| {
+            let Some(at) = config.accounts.iter().position(|a| a.id == account_id) else {
+                return;
+            };
+            let to = if up {
+                at.checked_sub(1)
+            } else {
+                Some(at + 1).filter(|i| *i < config.accounts.len())
+            };
+            // At either end there is nowhere to go, and that is not an error —
+            // the menu item is simply disabled.
+            if let Some(to) = to {
+                config.accounts.swap(at, to);
+            }
+        })
+    }
+
     /// Repaints an account. Provenance colour is the only way to tell two
     /// accounts apart at a glance in a unified list, so a collision makes the
     /// unified inbox unreadable — and until now nothing could fix one.

@@ -64,6 +64,9 @@ export const api = {
 
   setAccountColor: (accountId: string, color: string) =>
     invoke<void>("set_account_color", { accountId, color }),
+
+  moveAccount: (accountId: string, up: boolean) =>
+    invoke<void>("move_account", { accountId, up }),
 };
 
 /** Fastmail's JMAP discovery endpoint. */

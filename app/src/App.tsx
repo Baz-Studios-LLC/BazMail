@@ -358,6 +358,12 @@ export default function App() {
         unreadTotal={unreadTotal}
         onSelect={(next) => void selectView(next)}
         onAddAccount={() => setSigningIn(true)}
+        onMoveAccount={(accountId, up) => {
+          void api
+            .moveAccount(accountId, up)
+            .then(() => bootstrap())
+            .catch((e) => setNote(String(e)));
+        }}
       />
 
       <div className="pane">

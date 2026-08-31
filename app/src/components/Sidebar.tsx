@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Account, Mailbox } from "../types";
 import { MailIcon } from "./Icons";
 
@@ -16,6 +16,8 @@ interface SidebarProps {
   unreadTotal: number;
   onSelect: (view: View) => void;
   onAddAccount: () => void;
+  /** Moves an account one place up or down. */
+  onMoveAccount: (accountId: string, up: boolean) => void;
 }
 
 /** Mailboxes people actually navigate to, in the order they expect them. */
@@ -50,8 +52,27 @@ export function Sidebar({
   unreadTotal,
   onSelect,
   onAddAccount,
+  onMoveAccount,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  // Which account's context menu is open, and where it sits in the order —
+  // the index decides whether "up" and "down" have anywhere to go.
+  const [menu, setMenu] = useState<{ accountId: string; index: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!menu) return;
+    const dismiss = () => setMenu(null);
+    // Capture, so a click on something that stops propagation cannot leave the
+    // menu stranded open behind whatever it opened.
+    document.addEventListener("mousedown", dismiss, true);
+    document.addEventListener("keydown", dismiss);
+    return () => {
+      document.removeEventListener("mousedown", dismiss, true);
+      document.removeEventListener("keydown", dismiss);
+    };
+  }, [menu]);
 
   function toggle(accountId: string) {
     setCollapsed((current) => {
@@ -80,7 +101,7 @@ export function Sidebar({
         </button>
       </div>
 
-      {accounts.map((account) => {
+      {accounts.map((account, index) => {
         const mailboxes = sortMailboxes(mailboxesByAccount[account.id] ?? []);
         if (mailboxes.length === 0) return null;
         const isCollapsed = collapsed.has(account.id);
@@ -93,6 +114,10 @@ export function Sidebar({
             <button
               className="sidebar-label as-toggle"
               onClick={() => toggle(account.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setMenu({ accountId: account.id, index });
+              }}
               aria-expanded={!isCollapsed}
             >
               <span className="dot" style={{ background: account.color }} />
@@ -114,6 +139,33 @@ export function Sidebar({
                 <path d="m6 9 6 6 6-6" />
               </svg>
             </button>
+
+            {menu?.accountId === account.id && (
+              <div className="account-menu" role="menu">
+                <button
+                  className="account-menu-item"
+                  role="menuitem"
+                  disabled={index === 0}
+                  onClick={() => {
+                    setMenu(null);
+                    onMoveAccount(account.id, true);
+                  }}
+                >
+                  Move up
+                </button>
+                <button
+                  className="account-menu-item"
+                  role="menuitem"
+                  disabled={index === accounts.length - 1}
+                  onClick={() => {
+                    setMenu(null);
+                    onMoveAccount(account.id, false);
+                  }}
+                >
+                  Move down
+                </button>
+              </div>
+            )}
             {!isCollapsed &&
               mailboxes.map((mailbox) => {
               const active =
