@@ -325,13 +325,13 @@ export default function App() {
     <div className="window">
       <div className="rail">
         <div className="rail-item active">
-          <MailIcon size={19} />
+          <MailIcon size={22} />
         </div>
         <div className="rail-item">
-          <PeopleIcon size={19} />
+          <PeopleIcon size={22} />
         </div>
         <div className="rail-item">
-          <CalendarIcon size={19} />
+          <CalendarIcon size={22} />
         </div>
         <div className="rail-spacer" />
         <AvatarMenu

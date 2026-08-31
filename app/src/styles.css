@@ -83,7 +83,11 @@
   --accent-sel: rgba(91, 124, 250, 0.24);
   --warn: var(--gold);
 
-  --rail-width: 46px;
+  /* 80px because macOS centres its traffic lights at 40pt from the window
+     edge, and they are laid out by the system rather than by us. Sizing
+     the rail around them is the one approach that does not fight the OS.
+     Applied on every platform: one rail, not a Mac-shaped exception. */
+  --rail-width: 80px;
   --sidebar-width: 236px;
   --titlebar-height: 30px;
 
@@ -166,8 +170,10 @@ body.mac .rail {
 }
 
 .rail-item {
-  width: 34px;
-  height: 32px;
+  /* Scaled with the rail so the icons still read as its content rather than as
+     small marks adrift in a wide column. */
+  width: 52px;
+  height: 44px;
   border-radius: var(--radius-control);
   color: var(--text-lo);
   display: flex;
@@ -185,15 +191,15 @@ body.mac .rail {
 }
 
 .avatar-me {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.13);
   color: #cdd3da;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -651,11 +657,6 @@ body.mac .rail {
    caption ourselves and none of this applies. */
 .titlebar.mac {
   height: 38px;
-}
-
-.titlebar.mac .titlebar-drag {
-  /* The rail already accounts for the first 46px of the window. */
-  padding-left: 30px;
 }
 
 .titlebar-name {
