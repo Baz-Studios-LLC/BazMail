@@ -676,9 +676,12 @@ export default function App() {
               accounts={accounts}
               draft={draft}
               onClose={() => setDraft(null)}
-              onSent={() => {
+              onSent={(warning) => {
                 setDraft(null);
-                setNote("Sent.");
+                // A warning means it went but the copy did not file. Said here
+                // rather than swallowed: the send succeeded, so this is the only
+                // place it can be mentioned at all.
+                setNote(warning ?? "Sent.");
                 void bootstrap();
               }}
             />

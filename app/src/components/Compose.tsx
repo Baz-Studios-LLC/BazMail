@@ -18,7 +18,8 @@ interface ComposeProps {
   draft: Draft;
   onClose: () => void;
   /** Called once the server has accepted it, so the shell can refresh Sent. */
-  onSent: () => void;
+  /** Carries a warning when the message was sent but its copy was not filed. */
+  onSent: (warning?: string | null) => void;
 }
 
 /**
@@ -84,7 +85,7 @@ export function Compose({ accounts, draft, onClose, onSent }: ComposeProps) {
     setSending(true);
     setError(null);
     try {
-      await api.send({
+      const warning = await api.send({
         accountId: account.id,
         to: recipients,
         cc: parseRecipients(form.cc),
@@ -94,7 +95,7 @@ export function Compose({ accounts, draft, onClose, onSent }: ComposeProps) {
         inReplyTo: form.inReplyTo ?? null,
         references: form.references ?? [],
       });
-      onSent();
+      onSent(warning);
     } catch (e) {
       setError(String(e));
     } finally {

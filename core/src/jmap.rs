@@ -339,7 +339,7 @@ impl JmapClient {
         drafts_mailbox: &str,
         sent_mailbox: &str,
         message: &crate::model::Outgoing,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         // Two different accounts in principle. Email/set and the mailbox ids are
         // the mail account's; only the submission belongs to the submission
         // account. Fastmail makes them the same, which is exactly why using one
@@ -441,16 +441,20 @@ impl JmapClient {
         // separately because it can fail on its own: the message is genuinely
         // sent at that point, so this is a misfiled copy rather than a failed
         // send, and turning it into an error would tell the user to send again.
+        // Returned rather than printed. This is a windowed application: its
+        // standard error goes nowhere, so a copy that failed to file looked
+        // exactly like one that filed correctly — and the only way to find
+        // out was to go and look in Sent.
         if let Ok(filing) = response.args("Email/set", "s0") {
             if let Some(failed) = filing.get("notUpdated") {
                 if !failed.is_null() && failed.as_object().is_some_and(|o| !o.is_empty()) {
-                    eprintln!(
-                        "sent, but the server would not file the copy in Sent: {failed}"
-                    );
+                    return Ok(Some(format!(
+                        "The message was sent, but the server would not file a copy in Sent: {failed}"
+                    )));
                 }
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     pub async fn set_mailboxes(

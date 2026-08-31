@@ -93,7 +93,11 @@ impl Backend {
         drafts_mailbox: &str,
         sent_mailbox: &str,
         message: &Outgoing,
-    ) -> Result<()> {
+        // Some(_) means the message was sent and the copy was not filed:
+        // worth saying, and not a failed send. Distinguishing the two in the
+        // return type rather than in prose keeps a caller from telling
+        // someone to send again for a message that already went.
+    ) -> Result<Option<String>> {
         match self {
             Backend::Jmap(c) => {
                 let identity = c.identity_for(&from.email).await?;
@@ -123,10 +127,16 @@ impl Backend {
                 // that was never sent is worse than filing nothing — and a
                 // failure here costs the record, not the mail, so it is
                 // reported rather than turned into a failed send.
+                // Returned rather than printed: standard error goes nowhere
+                // in a windowed application, so this failure was invisible.
+                // It cost the record of a message that had genuinely been
+                // sent, and nothing said so.
                 if let Err(e) = imap.append(sent_mailbox, &raw).await {
-                    eprintln!("sent, but could not file a copy in {sent_mailbox}: {e:#}");
+                    return Ok(Some(format!(
+                        "The message was sent, but a copy could not be filed in {sent_mailbox}: {e:#}"
+                    )));
                 }
-                Ok(())
+                Ok(None)
             }
         }
     }
@@ -529,7 +539,7 @@ impl Engine {
     /// twice, and a retry loop that duplicates mail is worse than one that
     /// fails visibly. A proper outbox for sending needs a deduplication key the
     /// server honours, which is its own piece of work.
-    pub async fn send(&self, message: &Outgoing) -> Result<()> {
+    pub async fn send(&self, message: &Outgoing) -> Result<Option<String>> {
         let identity = self
             .config
             .read()
@@ -547,7 +557,8 @@ impl Engine {
         let drafts = self.mailbox_by_role(&message.account_id, "drafts")?;
         let sent = self.mailbox_by_role(&message.account_id, "sent")?;
 
-        self.client(&message.account_id)
+        let warning = self
+            .client(&message.account_id)
             .await?
             .send(&from, &drafts, &sent, message)
             .await?;
@@ -555,7 +566,7 @@ impl Engine {
         // Pull Sent straight away so the message you just sent is visible
         // rather than absent until whenever the next sync happens.
         let _ = self.sync_mailbox(&message.account_id, &sent, 50).await;
-        Ok(())
+        Ok(warning)
     }
 
     /// Everything the mirror holds for one mailbox, newest first.

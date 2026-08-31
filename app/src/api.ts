@@ -47,7 +47,9 @@ export const api = {
     text: string;
     inReplyTo: string | null;
     references: string[];
-  }) => invoke<void>("send", { message }),
+    // A string back means the message went and its copy did not file. Not an
+    // error: telling someone that is different from telling them to resend.
+  }) => invoke<string | null>("send", { message }),
 
   markRead: (accountId: string, emailId: string, read: boolean) =>
     invoke<void>("mark_read", { accountId, emailId, read }),

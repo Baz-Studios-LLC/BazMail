@@ -223,7 +223,11 @@ fn set_account_color(
 }
 
 #[tauri::command]
-async fn send(engine: State<'_, Engine>, message: Outgoing) -> CmdResult<()> {
+/// Returns a warning when the message went but its copy did not file.
+///
+/// Not an error: the mail has left, and reporting it as a failure would tell
+/// someone to send it a second time.
+async fn send(engine: State<'_, Engine>, message: Outgoing) -> CmdResult<Option<String>> {
     engine.send(&message).await.map_err(fail)
 }
 
