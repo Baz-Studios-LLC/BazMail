@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ACCOUNT_COLORS, api } from "../api";
 import type { Account, Status } from "../types";
 import { Panel } from "./Panel";
+import { describeUpdate, type UpdateState } from "../useUpdater";
 
 interface SettingsProps {
   status: Status | null;
@@ -11,6 +12,8 @@ interface SettingsProps {
   onAddAccount: () => void;
   /** Renews an account's credential in place, keeping its id and settings. */
   onReconnect: (account: Account) => void;
+  updateState: UpdateState;
+  onCheckForUpdates: () => void;
   /** Called after an account is removed so the shell can reload. */
   onChanged: () => void;
   onClose: () => void;
@@ -31,6 +34,8 @@ export function Settings({
   onMarkReadDelayChange,
   onAddAccount,
   onReconnect,
+  updateState,
+  onCheckForUpdates,
   onChanged,
   onClose,
 }: SettingsProps) {
@@ -172,6 +177,34 @@ export function Settings({
         <p className="setup-aside">
           A delay matters because <kbd>j</kbd> and <kbd>k</kbd> open each message
           as they move. Marking immediately would mark everything you pass.
+        </p>
+      </section>
+
+      <section className="settings-section">
+        <h3>Updates</h3>
+        <div className="field-row">
+          <button
+            className="btn-quiet"
+            disabled={
+              updateState.kind === "checking" || updateState.kind === "downloading"
+            }
+            onClick={onCheckForUpdates}
+          >
+            Check now
+          </button>
+          <span
+            className={
+              updateState.kind === "error" ? "setup-aside fact-warn" : "setup-aside"
+            }
+          >
+            {describeUpdate(updateState, status?.version ?? "")}
+          </span>
+        </div>
+        <p className="setup-aside">
+          Updates download in the background and apply on their own. This panel
+          exists because silent should mean “does not interrupt you”, not “will
+          not say what happened” — a failure nobody can see is a failure nobody
+          can fix.
         </p>
       </section>
 

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useUpdater } from "./useUpdater";
 import type { Account, EmailBody, Envelope, Mailbox, Status } from "./types";
 import { Sidebar, type View } from "./components/Sidebar";
 import { MessageList } from "./components/MessageList";
@@ -24,17 +23,6 @@ const UNIFIED: View = { kind: "unified", title: "Inbox" };
 // browser the surrounding chrome is the browser's own and there is nothing to
 // replace.
 const NATIVE = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-/**
- * How often to look for a new release.
- *
- * Five minutes is far more often than a release actually appears, but the cost
- * is one small request and the polling stops for good as soon as it finds
- * something — so the upper bound on wasted work is a day of cheap 404s, and
- * the payoff is that an update is already downloaded and waiting whenever you
- * next quit, rather than only if you happened to launch after it shipped.
- */
-const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -66,6 +54,7 @@ export default function App() {
   // adding: the id, label and colour all survive, so the unified list does not
   // reshuffle underneath you and archived mail keeps its account.
   const [reconnecting, setReconnecting] = useState<Account | null>(null);
+  const { state: updateState, checkNow } = useUpdater();
 
   /**
    * Renews an account's credential in place.
@@ -290,62 +279,6 @@ export default function App() {
     [envelopes, unreadOnly, selectedId],
   );
 
-  // Updates the way Chrome does them: checked and fetched quietly in the
-  // background, applied when you next close the app. Nothing interrupts
-  // reading mail, and there is no dialog asking permission to do the thing you
-  // already asked for by installing it.
-  useEffect(() => {
-    let pending: Update | null = null;
-    let checking = false;
-    let cancelled = false;
-
-    async function poll() {
-      // Nothing to look for once something is downloaded and waiting: another
-      // check would find the same release and re-download it. This is also
-      // what bounds the polling — it stops on its own the moment it succeeds.
-      if (pending || checking || cancelled) return;
-      checking = true;
-      try {
-        const update = await check();
-        if (!update || cancelled) return;
-        await update.download();
-        if (!cancelled) pending = update;
-      } catch {
-        // A failed check is not worth reporting: offline, a rate limit, no
-        // release published yet. It tries again on the next tick, and in the
-        // meantime the copy you have works fine.
-      } finally {
-        checking = false;
-      }
-    }
-
-    void poll();
-    const timer = setInterval(() => void poll(), UPDATE_CHECK_INTERVAL_MS);
-
-    const stopping = getCurrentWindow().onCloseRequested(async (event) => {
-      if (!pending) return;
-      event.preventDefault();
-
-      // Cleared before installing rather than after: if the installer fails,
-      // the next close has to actually close, not trap the window in a retry.
-      const update = pending;
-      pending = null;
-      try {
-        await update.install();
-      } catch {
-        // Nothing useful to do at exit. The download is kept and reapplied
-        // next time rather than being lost.
-      }
-      void getCurrentWindow().destroy();
-    });
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-      void stopping.then((stop) => stop());
-    };
-  }, []);
-
   // The triage loop: j / k move, e archives and advances, z undoes.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -479,6 +412,8 @@ export default function App() {
                 setSigningIn(true);
               }}
               onReconnect={(account) => void reconnect(account)}
+              updateState={updateState}
+              onCheckForUpdates={() => void checkNow()}
               onChanged={() => void bootstrap()}
               onClose={() => setShowSettings(false)}
             />
