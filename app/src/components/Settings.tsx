@@ -3,6 +3,7 @@ import { ACCOUNT_COLORS, api } from "../api";
 import type { Account, Status } from "../types";
 import { Panel } from "./Panel";
 import { describeUpdate, type UpdateState } from "../useUpdater";
+import { NOTIFY_KEY, notificationsEnabled } from "../notify";
 
 interface SettingsProps {
   status: Status | null;
@@ -59,6 +60,7 @@ export function Settings({
 }: SettingsProps) {
   // Removing an account is not undoable, so it takes two clicks rather than one.
   const [tab, setTab] = useState<TabId>("accounts");
+  const [notify, setNotify] = useState(notificationsEnabled);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -227,6 +229,23 @@ export function Settings({
         <p className="setup-aside">
           A delay matters because <kbd>j</kbd> and <kbd>k</kbd> open each message
           as they move. Marking immediately would mark everything you pass.
+        </p>
+
+        <label className="field-check">
+          <input
+            type="checkbox"
+            checked={notify}
+            onChange={(e) => {
+              setNotify(e.target.checked);
+              localStorage.setItem(NOTIFY_KEY, String(e.target.checked));
+            }}
+          />
+          <span>Notify me when mail arrives</span>
+        </label>
+        <p className="setup-aside">
+          BazMail checks every few minutes and announces what is new. One
+          notification names the sender; several are summarised, because a stack
+          of toasts after a sync tells you less than a number does.
         </p>
       </section>
       )}

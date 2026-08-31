@@ -308,6 +308,9 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
 
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_notification::init())?;
+
             let engine = Engine::new()?;
             app.manage(engine);
 

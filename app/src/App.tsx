@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { useUpdater } from "./useUpdater";
+import { announce } from "./notify";
 import { Resizer, clampListWidth, LIST_DEFAULT } from "./components/Resizer";
 import type { Account, EmailBody, Envelope, Mailbox, Status } from "./types";
 import { Sidebar, type View } from "./components/Sidebar";
@@ -20,6 +21,16 @@ import {
 } from "./components/Icons";
 
 const UNIFIED: View = { kind: "unified", title: "Inbox" };
+
+/**
+ * How often to look for new mail.
+ *
+ * Polling, and honestly so: JMAP has a push channel and IMAP has IDLE, and
+ * either would beat this. Three minutes is the compromise until one of them
+ * exists — often enough that mail is not visibly stale, rare enough that two
+ * accounts are not being woken constantly.
+ */
+const MAIL_CHECK_INTERVAL_MS = 3 * 60 * 1000;
 
 // Native decorations are off in Tauri, so we draw our own caption. In a
 // browser the surrounding chrome is the browser's own and there is nothing to
@@ -60,6 +71,17 @@ export default function App() {
   // message and back does not lose what was typed.
   const [draft, setDraft] = useState<Draft | null>(null);
   const { state: updateState, checkNow } = useUpdater();
+  // Read by the background poll. Held in refs rather than passed as
+  // dependencies so that changing view does not tear down and restart the
+  // timer — with a three-minute interval, navigating every couple of minutes
+  // would mean it never fired at all.
+  const viewRef = useRef(view);
+  const accountsRef = useRef(accounts);
+  const checking = useRef(false);
+  // Every message id already seen in this session. Primed on the first load so
+  // launching the app does not announce an inbox you have been reading for
+  // weeks as though it all just arrived.
+  const seen = useRef<Set<string> | null>(null);
   // Remembered across restarts: a column width is a preference, and
   // re-dragging it every launch would make it a chore instead.
   const [listWidth, setListWidth] = useState(() => {
@@ -97,27 +119,41 @@ export default function App() {
   // archive already reached the server.
   const [lastArchived, setLastArchived] = useState<Envelope | null>(null);
 
+  useEffect(() => {
+    viewRef.current = view;
+    accountsRef.current = accounts;
+  }, [view, accounts]);
+
   const selected = envelopes.find((e) => e.id === selectedId) ?? null;
 
-  /** Pulls the current view out of the local store — never off the network. */
-  const loadFromStore = useCallback(async (current: View, accountList: Account[]) => {
+  /**
+   * Pulls the current view out of the local store — never off the network.
+   *
+   * Returns what it loaded as well as setting it, so the background check can
+   * work out what is new without querying a second time.
+   */
+  const loadFromStore = useCallback(
+    async (current: View, accountList: Account[]): Promise<Envelope[]> => {
     const boxes: Record<string, Mailbox[]> = {};
     for (const account of accountList) {
       boxes[account.id] = await api.mailboxes(account.id);
     }
     setMailboxes(boxes);
 
+    let loaded: Envelope[];
     if (current.kind === "unified") {
-      setEnvelopes(await api.unifiedInbox(200));
+      loaded = await api.unifiedInbox(200);
     } else if (current.mailboxId) {
       // Asked for directly rather than filtered out of the unified set. That
       // set is inbox-only by design, so narrowing it to Spam or Archive could
       // never match anything — the folder looked permanently empty while its
       // unread count, which comes from the server's mailbox list, was right.
-      setEnvelopes(await api.mailboxEnvelopes(current.mailboxId, 300));
+      loaded = await api.mailboxEnvelopes(current.mailboxId, 300);
     } else {
-      setEnvelopes([]);
+      loaded = [];
     }
+    setEnvelopes(loaded);
+    return loaded;
   }, []);
 
   const bootstrap = useCallback(async () => {
@@ -146,7 +182,8 @@ export default function App() {
         const failed = outcomes.filter((o) => !o.ok);
         const synced = outcomes.reduce((n, o) => n + o.envelopes, 0);
 
-        await loadFromStore(UNIFIED, s.accounts);
+        const loaded = await loadFromStore(UNIFIED, s.accounts);
+        seen.current = new Set(loaded.map((e) => e.id));
 
         setNote(
           failed.length > 0
@@ -172,6 +209,50 @@ export default function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  /**
+   * Checks for mail without disturbing what you are doing.
+   *
+   * Deliberately not `bootstrap`, which reloads the *unified* view and would
+   * throw you back to the inbox every few minutes if you were reading Spam.
+   * This reloads whatever view is open and leaves the selection alone, so a
+   * message arriving while you read one does not move the one you are on.
+   *
+   * Failures are silent. A poll that cannot reach the network is the ordinary
+   * state of a laptop, and an error in the status bar every few minutes would
+   * train you to ignore the status bar.
+   */
+  const checkForMail = useCallback(async () => {
+    // A slow sync must not stack up behind itself: an account on a poor
+    // connection can easily outlast the interval.
+    if (checking.current) return;
+    checking.current = true;
+    try {
+      await api.syncAll(200);
+      const loaded = await loadFromStore(viewRef.current, accountsRef.current);
+
+      // Nothing is announced until the first load has established what was
+      // already there — otherwise the first check after launch would report
+      // the whole inbox as new.
+      if (seen.current) {
+        const previous = seen.current;
+        const fresh = loaded.filter((e) => e.isUnread && !previous.has(e.id));
+        void announce(fresh, accountsRef.current);
+      }
+      seen.current = new Set(loaded.map((e) => e.id));
+    } catch {
+      // Offline, a revoked token, a server having a moment. The next tick tries
+      // again and the mirror still holds everything from last time.
+    } finally {
+      checking.current = false;
+    }
+  }, [loadFromStore]);
+
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    const timer = setInterval(() => void checkForMail(), MAIL_CHECK_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [checkForMail, accounts.length]);
 
   const openMessage = useCallback(async (envelope: Envelope) => {
     // Clicking a message is a decision to go back to reading, so it takes you
