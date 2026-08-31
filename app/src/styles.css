@@ -326,6 +326,20 @@ body.mac .rail {
   cursor: col-resize;
   background: transparent;
   z-index: 3;
+  /* The gesture belongs to us, not to the scroller underneath. */
+  touch-action: none;
+}
+
+/* Held on the body for the length of a drag, so the cursor stays correct once
+   the pointer leaves the nine-pixel strip, and nothing gets selected as it
+   sweeps across the panes on either side. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.resizing * {
+  cursor: col-resize !important;
 }
 
 .resizer:hover,

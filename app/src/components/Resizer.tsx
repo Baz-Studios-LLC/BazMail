@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 /** Narrow enough that the message list keeps two readable lines, wide enough
  *  that a long subject fits — past either end the layout stops being useful
@@ -22,22 +22,49 @@ interface ResizerProps {
 /**
  * The grab strip between the message list and the reader.
  *
- * Uses pointer capture rather than window listeners: the pointer keeps
- * reporting to this element even when it outruns the drag — which it will,
- * since the clamp stops the layout at a limit the cursor is happy to pass.
- * Without capture the release would land on whatever is under the cursor and
- * the strip would stay stuck in a drag.
+ * The drag is tracked on the window rather than on this element. Pointer
+ * capture is the tidier-looking approach and it did not work here: the strip is
+ * nine pixels wide, a drag leaves it within the first frame, and once the moves
+ * stop arriving the column simply stops following the cursor — which reads as
+ * "the divider highlights but will not drag".
+ *
+ * Window listeners have no such failure mode. They also keep working past the
+ * clamp, so a cursor that runs well beyond the maximum still drags the column
+ * back when it returns, instead of dropping the gesture at the limit.
  */
 export function Resizer({ width, onChange, onCommit }: ResizerProps) {
-  const origin = useRef<{ x: number; width: number } | null>(null);
+  const drag = useRef<{ x: number; from: number; latest: number } | null>(null);
 
-  const onPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!origin.current) return;
-      onChange(clampListWidth(origin.current.width + (event.clientX - origin.current.x)));
-    },
-    [onChange],
-  );
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      const active = drag.current;
+      if (!active) return;
+      // Held so the pointer cannot outrun the layout and lose the gesture.
+      event.preventDefault();
+      const next = clampListWidth(active.from + (event.clientX - active.x));
+      active.latest = next;
+      onChange(next);
+    };
+
+    const onEnd = () => {
+      const active = drag.current;
+      if (!active) return;
+      drag.current = null;
+      document.body.classList.remove("resizing");
+      onCommit(active.latest);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onEnd);
+    // A cancelled pointer must still end the drag, or the body keeps the
+    // resize cursor and every later click looks like it is about to drag.
+    window.addEventListener("pointercancel", onEnd);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+    };
+  }, [onChange, onCommit]);
 
   return (
     <div
@@ -46,14 +73,11 @@ export function Resizer({ width, onChange, onCommit }: ResizerProps) {
       aria-orientation="vertical"
       aria-label="Resize the message list"
       onPointerDown={(event) => {
-        origin.current = { x: event.clientX, width };
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={onPointerMove}
-      onPointerUp={(event) => {
-        if (origin.current) onCommit(width);
-        origin.current = null;
-        event.currentTarget.releasePointerCapture(event.pointerId);
+        event.preventDefault();
+        drag.current = { x: event.clientX, from: width, latest: width };
+        // Keeps the resize cursor while the pointer is anywhere on screen, and
+        // stops the drag selecting text in the panes it passes over.
+        document.body.classList.add("resizing");
       }}
       // Dragging a column to an awkward width is easy; getting back to the
       // original by eye is not.
