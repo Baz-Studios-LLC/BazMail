@@ -242,6 +242,40 @@ pub fn run() {
             // unrecoverable — better to die loudly than to run with no mirror.
             let engine = Engine::new()?;
             app.manage(engine);
+
+            // The window is built here rather than by the config so it can carry
+            // a new-window handler. Links inside a message body target _blank,
+            // so every click a sender authored arrives at this closure — and
+            // none of them is allowed to become a window.
+            //
+            // They go to the real browser instead, which is the point: the
+            // address bar is visible, the user's extensions and password manager
+            // are there, and no HTML written by a stranger ever renders in a
+            // webview of ours.
+            let handle = app.handle().clone();
+            let config = app
+                .config()
+                .app
+                .windows
+                .first()
+                .cloned()
+                .ok_or("no window is configured")?;
+
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
+                .on_new_window(move |url, _features| {
+                    // Only the two web schemes are handed to the OS. A sender
+                    // can write file:, javascript: or anything else into an
+                    // href, and passing those to the shell would be handing a
+                    // stranger the ability to open local files.
+                    if matches!(url.scheme(), "http" | "https") {
+                        if let Err(e) = handle.opener().open_url(url.to_string(), None::<&str>) {
+                            eprintln!("could not open {url} in the browser: {e}");
+                        }
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                })
+                .build()?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

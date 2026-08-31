@@ -75,9 +75,49 @@ export const ACCOUNT_COLORS = [
   "#4fc4c0",
 ];
 
-export function sandboxDocument(body: EmailBody): string {
+/**
+ * The hosts a message would reach out to if its images were allowed.
+ *
+ * Advisory only. The CSP is what actually blocks anything, and it fails closed:
+ * a host this scan misses stays blocked rather than slipping through. That
+ * separation is deliberate, because scanning a stranger's HTML with a pattern
+ * is approximate by nature and should never be load-bearing.
+ *
+ * Naming the hosts is the honest version of "images are blocked". Seeing
+ * `track.klaviyo.com` in the list tells you something that a generic warning
+ * never could.
+ */
+export function remoteImageHosts(body: EmailBody): string[] {
+  if (!body.html) return [];
+
+  const hosts = new Set<string>();
+  // src="…" covers <img>; url(…) covers CSS backgrounds, which the CSP governs
+  // under img-src too.
+  const pattern = /src\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')]+)["']?\s*\)/gi;
+
+  for (const match of body.html.matchAll(pattern)) {
+    const raw = (match[1] ?? match[2] ?? "").trim();
+    if (!/^https?:\/\//i.test(raw)) continue;
+    try {
+      hosts.add(new URL(raw).hostname);
+    } catch {
+      // A malformed URL is not worth reporting; the CSP blocks it regardless.
+    }
+  }
+
+  return [...hosts].sort();
+}
+
+export function sandboxDocument(
+  body: EmailBody,
+  { loadRemoteImages = false }: { loadRemoteImages?: boolean } = {},
+): string {
+  // Only img-src ever moves. default-src 'none' keeps remote fonts, stylesheets
+  // and connections blocked whatever the user decides about pictures, and
+  // scripts have no source at all in either case.
+  const imgSrc = loadRemoteImages ? "data: https:" : "data:";
   const csp =
-    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src 'none'; frame-src 'none'";
+    `default-src 'none'; style-src 'unsafe-inline'; img-src ${imgSrc}; media-src 'none'; frame-src 'none'`;
 
   const content = body.html
     ? body.html
@@ -85,8 +125,14 @@ export function sandboxDocument(body: EmailBody): string {
         body.text ?? "",
       )}</pre>`;
 
+  // A target-only <base> makes every link in the message open out of the frame
+  // without rewriting a single anchor. Parsing a stranger's HTML to add
+  // attributes is exactly the kind of thing that grows an injection bug; one
+  // declarative line in our own head cannot. It carries no href, so relative
+  // URLs still resolve as they did.
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
+<base target="_blank">
 <style>
   :root { color-scheme: dark; }
   body {

@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "BazMail",
+        "create": false,
         "width": 1480,
         "height": 940,
         "minWidth": 900,
