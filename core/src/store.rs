@@ -220,21 +220,46 @@ impl Store {
 
     /// Envelopes across every account, newest first — the unified inbox read.
     /// `mailbox_ids` narrows to specific mailboxes; empty means all of them.
+    /// Everything in these mailboxes, newest first.
+    ///
+    /// The filter is in the query. It used to take the newest `limit * 8`
+    /// envelopes across every account and mailbox and then keep whichever
+    /// belonged here, which is only correct while a mailbox's mail happens to
+    /// be among the newest mail anywhere. Open a folder whose messages are
+    /// older than that window and it showed a partial list, or nothing — and
+    /// the contents changed as sync brought in newer mail somewhere else,
+    /// which reads as the client losing track of what is in a folder.
+    ///
+    /// Membership is a JSON array, so each id is matched as its own quoted
+    /// element. That is exact rather than a substring: "Sent" must not match
+    /// ["Sent Messages"], and on iCloud both of those are real folders.
     pub fn envelopes(&self, mailbox_ids: &[String], limit: usize) -> Result<Vec<Envelope>> {
-        let mut stmt = self.conn.prepare_cached(
+        let mut args: Vec<rusqlite::types::Value> = Vec::new();
+        let filter = if mailbox_ids.is_empty() {
+            String::new()
+        } else {
+            for id in mailbox_ids {
+                // Encoded the same way it was stored, so escaping matches.
+                let quoted = serde_json::to_string(id).unwrap_or_else(|_| format!("\"{id}\""));
+                args.push(format!("%{quoted}%").into());
+            }
+            let ors = mailbox_ids
+                .iter()
+                .map(|_| "mailbox_ids LIKE ?")
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            format!("WHERE ({ors}) ")
+        };
+        args.push((limit as i64).into());
+
+        let mut stmt = self.conn.prepare_cached(&format!(
             "SELECT account_id, id, thread_id, mailbox_ids, from_json, to_json,
                     subject, preview, received_at, is_unread, is_flagged, has_attachment,
                     verified_domain, message_id, references_json
-             FROM envelopes ORDER BY received_at DESC LIMIT ?1",
-        )?;
-        // Over-fetch, then filter in Rust: mailbox membership is a JSON array, and
-        // a proper join table is the right fix once this stops being fast enough.
-        let over_fetch = if mailbox_ids.is_empty() {
-            limit
-        } else {
-            limit * 8
-        };
-        let rows = stmt.query_map(params![over_fetch as i64], |row| {
+             FROM envelopes {filter}ORDER BY received_at DESC LIMIT ?"
+        ))?;
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), |row| {
             let mailboxes: String = row.get(3)?;
             let from: String = row.get(4)?;
             let to: String = row.get(5)?;
@@ -261,6 +286,10 @@ impl Store {
             })
         })?;
 
+        // Kept as a guard rather than as the filter. The query is exact now,
+        // so this should never drop anything — but membership is the one
+        // thing here that must not be approximated, and a LIKE is a weaker
+        // promise than comparing the parsed array.
         let mut out = Vec::new();
         for envelope in rows {
             let envelope = envelope?;
@@ -268,9 +297,6 @@ impl Store {
                 || envelope.mailbox_ids.iter().any(|id| mailbox_ids.contains(id));
             if keep {
                 out.push(envelope);
-            }
-            if out.len() >= limit {
-                break;
             }
         }
         Ok(out)
@@ -456,6 +482,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_old_mailbox_is_not_hidden_by_newer_mail_elsewhere() {
+        // The bug this replaces: the query took the newest limit * 8
+        // envelopes across every mailbox and then kept whichever belonged
+        // here. A quiet folder whose mail is older than that window came
+        // back empty, and filled in or emptied again as sync brought in
+        // newer mail somewhere else — which reads as the client losing
+        // track of what is in a folder.
+        let store = Store::open_in_memory().unwrap();
+
+        let mut mail = vec![envelope("old", "2026-01-01T09:00:00Z", "archive")];
+        for n in 0..40 {
+            mail.push(envelope(
+                &format!("new-{n}"),
+                &format!("2026-08-{:02}T09:00:00Z", (n % 28) + 1),
+                "inbox",
+            ));
+        }
+        store.put_envelopes(&mail).unwrap();
+
+        // Five would be over-fetched as forty under the old rule, and all
+        // forty newest are in the inbox — so the archived one fell outside
+        // the window and vanished.
+        let archived = store.envelopes(&["archive".to_string()], 5).unwrap();
+        assert_eq!(archived.len(), 1, "the archived message should still be found");
+        assert_eq!(archived[0].id, "old");
+    }
+
+    #[test]
+    fn one_mailbox_name_is_not_a_prefix_of_another() {
+        // iCloud really does expose both, and the live one is Sent Messages.
+        // Matching membership loosely would put every sent message in both.
+        let store = Store::open_in_memory().unwrap();
+        store
+            .put_envelopes(&[
+                envelope("a", "2026-08-30T09:00:00Z", "Sent"),
+                envelope("b", "2026-08-31T09:00:00Z", "Sent Messages"),
+            ])
+            .unwrap();
+
+        let sent = store.envelopes(&["Sent".to_string()], 20).unwrap();
+        assert_eq!(sent.len(), 1, "Sent must not pick up Sent Messages");
+        assert_eq!(sent[0].id, "a");
+
+        let messages = store.envelopes(&["Sent Messages".to_string()], 20).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, "b");
+    }
     #[test]
     fn envelopes_round_trip_newest_first() {
         let store = Store::open_in_memory().unwrap();
