@@ -95,11 +95,20 @@ struct JmapResponse {
 impl JmapResponse {
     /// Pulls the arguments of the response tagged with `call_id`, turning a JMAP
     /// `error` response into a real error rather than a confusing parse failure.
-    fn args(&self, call_id: &str) -> Result<&Value> {
+    /// Pulls the arguments of one response, matched on *both* the method name
+    /// and the call id.
+    ///
+    /// The id alone is not unique. `onSuccessUpdateEmail` makes the server
+    /// return an extra `Email/set` response carrying the same call id as the
+    /// `EmailSubmission/set` that triggered it — so matching on id and taking
+    /// the first hit reads the submission and never looks at whether filing the
+    /// message into Sent succeeded. A send could go out, fail to file, and
+    /// report success.
+    fn args(&self, method: &str, call_id: &str) -> Result<&Value> {
         for entry in &self.method_responses {
             let name = entry.get(0).and_then(Value::as_str).unwrap_or_default();
             let id = entry.get(2).and_then(Value::as_str).unwrap_or_default();
-            if id != call_id {
+            if id != call_id || (name != method && name != "error") {
                 continue;
             }
             let args = entry
@@ -111,11 +120,11 @@ impl JmapResponse {
                     .and_then(Value::as_str)
                     .unwrap_or("unknown error");
                 let detail = args.get("description").and_then(Value::as_str).unwrap_or("");
-                anyhow::bail!("JMAP error on '{call_id}': {kind} {detail}");
+                anyhow::bail!("JMAP error on {method} '{call_id}': {kind} {detail}");
             }
             return Ok(args);
         }
-        Err(anyhow!("no JMAP response tagged '{call_id}'"))
+        Err(anyhow!("no {method} response tagged '{call_id}'"))
     }
 }
 
@@ -190,7 +199,7 @@ impl JmapClient {
             ])])
             .await?;
 
-        let list = response.args("m0")?.get("list").cloned().unwrap_or(json!([]));
+        let list = response.args("Mailbox/get", "m0")?.get("list").cloned().unwrap_or(json!([]));
         let raw: Vec<JmapMailbox> = serde_json::from_value(list).context("parsing mailboxes")?;
 
         Ok(raw
@@ -251,7 +260,7 @@ impl JmapClient {
             ])
             .await?;
 
-        let list = response.args("g0")?.get("list").cloned().unwrap_or(json!([]));
+        let list = response.args("Email/get", "g0")?.get("list").cloned().unwrap_or(json!([]));
         let raw: Vec<JmapEmail> = serde_json::from_value(list).context("parsing envelopes")?;
 
         let mut envelopes: Vec<Envelope> = raw
@@ -287,17 +296,28 @@ impl JmapClient {
             )
             .await?;
 
-        let list = response.args("id0")?.get("list").cloned().unwrap_or(json!([]));
+        let list = response.args("Identity/get", "id0")?.get("list").cloned().unwrap_or(json!([]));
         let identities: Vec<JmapIdentity> =
             serde_json::from_value(list).context("parsing identities")?;
 
+        // No falling back to the first identity. The compose panel has already
+        // told the user which address this goes out as, and sending from a
+        // different one instead is worse than not sending: they would never
+        // know, and the recipient replies to the wrong place.
         identities
             .iter()
             .find(|i| i.email.eq_ignore_ascii_case(address))
-            .or_else(|| identities.first())
             .map(|i| i.id.clone())
             .ok_or_else(|| {
-                anyhow!("this account has no identity able to send as {address}")
+                let known: Vec<&str> = identities.iter().map(|i| i.email.as_str()).collect();
+                anyhow!(
+                    "this account cannot send as {address} — it has {}",
+                    if known.is_empty() {
+                        "no sending identities at all".to_string()
+                    } else {
+                        known.join(", ")
+                    }
+                )
             })
     }
 
@@ -320,7 +340,22 @@ impl JmapClient {
         sent_mailbox: &str,
         message: &crate::model::Outgoing,
     ) -> Result<()> {
-        let backend_account = self.session.submission_account_id()?;
+        // Two different accounts in principle. Email/set and the mailbox ids are
+        // the mail account's; only the submission belongs to the submission
+        // account. Fastmail makes them the same, which is exactly why using one
+        // for both went unnoticed.
+        let mail_account = self.session.mail_account_id()?;
+        let submission_account = self.session.submission_account_id()?;
+
+        // The submission refers to the draft by back-reference, and a
+        // back-reference cannot cross accounts — so if a server ever did split
+        // them, this flow could not work and should say so rather than
+        // assembling a request that fails somewhere less legible.
+        if mail_account != submission_account {
+            anyhow::bail!(
+                "this account keeps mail and submission in separate JMAP accounts                  ({mail_account} and {submission_account}), which BazMail cannot send through yet"
+            );
+        }
 
         let addresses = |list: &[EmailAddress]| -> Value {
             Value::Array(
@@ -359,13 +394,13 @@ impl JmapClient {
                 vec![
                     json!([
                         "Email/set",
-                        { "accountId": backend_account, "create": { "draft": email } },
+                        { "accountId": mail_account, "create": { "draft": email } },
                         "e0"
                     ]),
                     json!([
                         "EmailSubmission/set",
                         {
-                            "accountId": backend_account,
+                            "accountId": submission_account,
                             "create": {
                                 "send": { "emailId": "#draft", "identityId": identity_id }
                             },
@@ -386,14 +421,33 @@ impl JmapClient {
         // A JMAP method can succeed as a call and still refuse the object it was
         // given, so notCreated has to be read explicitly — otherwise a rejected
         // send looks exactly like a sent one.
-        if let Some(failed) = response.args("e0")?.get("notCreated") {
+        if let Some(failed) = response.args("Email/set", "e0")?.get("notCreated") {
             if !failed.is_null() && failed.as_object().is_some_and(|o| !o.is_empty()) {
                 anyhow::bail!("the server would not accept the message: {failed}");
             }
         }
-        if let Some(failed) = response.args("s0")?.get("notCreated") {
+        if let Some(failed) = response
+            .args("EmailSubmission/set", "s0")?
+            .get("notCreated")
+        {
             if !failed.is_null() && failed.as_object().is_some_and(|o| !o.is_empty()) {
                 anyhow::bail!("the server would not send the message: {failed}");
+            }
+        }
+
+        // onSuccessUpdateEmail makes the server return a second response under
+        // the same call id — an Email/set carrying the result of filing the
+        // message into Sent and clearing the draft flag. It is reported
+        // separately because it can fail on its own: the message is genuinely
+        // sent at that point, so this is a misfiled copy rather than a failed
+        // send, and turning it into an error would tell the user to send again.
+        if let Ok(filing) = response.args("Email/set", "s0") {
+            if let Some(failed) = filing.get("notUpdated") {
+                if !failed.is_null() && failed.as_object().is_some_and(|o| !o.is_empty()) {
+                    eprintln!(
+                        "sent, but the server would not file the copy in Sent: {failed}"
+                    );
+                }
             }
         }
         Ok(())
@@ -428,7 +482,7 @@ impl JmapClient {
 
         // Email/set answers 200 even when it refuses an individual change, so the
         // rejection has to be dug out of notUpdated or it looks like a success.
-        let args = response.args("s0")?;
+        let args = response.args("Email/set", "s0")?;
         if let Some(rejected) = args.get("notUpdated").and_then(Value::as_object) {
             if let Some((id, reason)) = rejected.iter().next() {
                 anyhow::bail!("JMAP refused to update {id}: {reason}");
@@ -468,7 +522,7 @@ impl JmapClient {
             ])])
             .await?;
 
-        let args = response.args("k0")?;
+        let args = response.args("Email/set", "k0")?;
         if let Some(rejected) = args.get("notUpdated").and_then(Value::as_object) {
             if let Some((id, reason)) = rejected.iter().next() {
                 anyhow::bail!("JMAP refused to update {id}: {reason}");
@@ -494,7 +548,7 @@ impl JmapClient {
             ])])
             .await?;
 
-        let list = response.args("b0")?.get("list").cloned().unwrap_or(json!([]));
+        let list = response.args("Email/get", "b0")?.get("list").cloned().unwrap_or(json!([]));
         let mut raw: Vec<JmapBody> = serde_json::from_value(list).context("parsing body")?;
         let body = raw
             .pop()
