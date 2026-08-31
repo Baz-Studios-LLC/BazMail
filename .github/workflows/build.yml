@@ -65,29 +65,57 @@ jobs:
         working-directory: app
         run: npm ci
 
+      # Signing is opt-in, and it has to be opt-in *by absence*. Declaring
+      # these next to the build step looks harmless but is not: a secret that
+      # does not exist expands to the empty string, and an env var set to ""
+      # is still present. Tauri reads APPLE_CERTIFICATE, finds it defined, and
+      # tries to import an empty certificate — which fails the whole build.
+      # That is not a hypothetical; it is what broke the first macOS run here.
+      #
+      # So the variables are exported only once a certificate is really
+      # configured. Until then macOS builds unsigned, and the day the Apple
+      # Developer account is approved you add the secrets and nothing in this
+      # file changes.
+      - name: Enable signing if certificates are configured
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$CERT" ]; then
+            echo "No Apple certificate configured - building unsigned."
+            exit 0
+          fi
+          {
+            echo "APPLE_CERTIFICATE<<__CERT_EOF__"
+            echo "$CERT"
+            echo "__CERT_EOF__"
+            echo "APPLE_CERTIFICATE_PASSWORD=$CERT_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$IDENTITY"
+          } >> "$GITHUB_ENV"
+
+          # Notarisation only runs when all three are present; a partial set
+          # would fail late, after the whole build.
+          if [ -n "$NOTARY_APPLE_ID" ] && [ -n "$NOTARY_PASSWORD" ] && [ -n "$NOTARY_TEAM_ID" ]; then
+            {
+              echo "APPLE_ID=$NOTARY_APPLE_ID"
+              echo "APPLE_PASSWORD=$NOTARY_PASSWORD"
+              echo "APPLE_TEAM_ID=$NOTARY_TEAM_ID"
+            } >> "$GITHUB_ENV"
+            echo "Signing and notarisation enabled."
+          else
+            echo "Signing enabled; notarisation skipped (needs APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID)."
+          fi
+
       - uses: tauri-apps/tauri-action@v0
         id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-          # Signing and notarisation. Every one of these is empty until the
-          # secrets exist, and Tauri simply skips signing when they are — so
-          # this is wired now and starts working the day the Apple Developer
-          # account is approved, with no change to this file.
-          #
-          # macOS: APPLE_CERTIFICATE is a base64 .p12 of the Developer ID
-          # Application certificate. Notarisation needs an app-specific
-          # password, never the Apple ID password itself.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-          # Windows: Tauri reads these for Authenticode signing.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           args: ${{ matrix.args }}

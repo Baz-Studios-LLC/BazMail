@@ -7,6 +7,7 @@
 //! and compiled to WASM for the web client.
 
 pub mod at_rest;
+pub mod auth;
 pub mod config;
 pub mod imap;
 pub mod jmap;
