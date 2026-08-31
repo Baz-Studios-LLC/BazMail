@@ -287,13 +287,79 @@ export default function App() {
         subject: /^re:/i.test(envelope.subject)
           ? envelope.subject
           : `Re: ${envelope.subject}`,
-        text: "",
+        // Two blank lines above it, so the cursor lands where you write rather
+        // than on top of your own name.
+        text: account?.signature ? `\n\n${account.signature}` : "",
         inReplyTo: envelope.messageId,
         references,
       });
     },
     [accounts],
   );
+
+  /**
+   * Deletes the selected message and advances, exactly like archive.
+   *
+   * The row goes immediately because the mirror has already been written; the
+   * queue carries it to the server afterwards.
+   */
+  const trashSelected = useCallback(async () => {
+    const envelope = envelopes.find((e) => e.id === selectedId);
+    if (!envelope) return;
+
+    const index = envelopes.findIndex((e) => e.id === selectedId);
+    const remaining = envelopes.filter((e) => e.id !== envelope.id);
+    const next = remaining[Math.min(index, remaining.length - 1)] ?? null;
+
+    setEnvelopes(remaining);
+    if (next) {
+      void openMessage(next);
+    } else {
+      setSelectedId(null);
+      setBody(null);
+    }
+    try {
+      await api.trash(envelope.accountId, envelope.id);
+    } catch (e) {
+      setNote(String(e));
+    }
+  }, [envelopes, selectedId, openMessage]);
+
+  /** Flags or unflags without moving the selection — it is a mark, not a verb. */
+  const toggleFlag = useCallback(async () => {
+    const envelope = envelopes.find((e) => e.id === selectedId);
+    if (!envelope) return;
+    const flagged = !envelope.isFlagged;
+    setEnvelopes((list) =>
+      list.map((e) => (e.id === envelope.id ? { ...e, isFlagged: flagged } : e)),
+    );
+    try {
+      await api.setFlagged(envelope.accountId, envelope.id, flagged);
+    } catch (e) {
+      setNote(String(e));
+    }
+  }, [envelopes, selectedId]);
+
+  /**
+   * Marks the selected message unread and steps off it.
+   *
+   * Staying on it would let the dwell timer mark it read again a second later,
+   * which is the least useful possible outcome of asking for it to be unread.
+   */
+  const markUnread = useCallback(async () => {
+    const envelope = envelopes.find((e) => e.id === selectedId);
+    if (!envelope) return;
+    setEnvelopes((list) =>
+      list.map((e) => (e.id === envelope.id ? { ...e, isUnread: true } : e)),
+    );
+    setSelectedId(null);
+    setBody(null);
+    try {
+      await api.markRead(envelope.accountId, envelope.id, false);
+    } catch (e) {
+      setNote(String(e));
+    }
+  }, [envelopes, selectedId]);
 
   /// Archive and advance — the whole triage loop in one keystroke. The row is
   /// dropped from the list immediately; the engine has already applied it to the
@@ -377,6 +443,21 @@ export default function App() {
         replyTo(envelope, event.key === "R");
         return;
       }
+      if (event.key === "#" || event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        void trashSelected();
+        return;
+      }
+      if (event.key === "f") {
+        event.preventDefault();
+        void toggleFlag();
+        return;
+      }
+      if (event.key === "u") {
+        event.preventDefault();
+        void markUnread();
+        return;
+      }
       if (event.key === "e") {
         event.preventDefault();
         void archiveSelected();
@@ -403,7 +484,7 @@ export default function App() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [visibleEnvelopes, envelopes, selectedId, openMessage, archiveSelected, undoArchive, replyTo]);
+  }, [visibleEnvelopes, envelopes, selectedId, openMessage, archiveSelected, undoArchive, replyTo, trashSelected, toggleFlag, markUnread]);
 
   const unreadTotal = envelopes.filter((e) => e.isUnread).length;
 
@@ -501,7 +582,7 @@ export default function App() {
                   to: "",
                   cc: "",
                   subject: "",
-                  text: "",
+                  text: sender?.signature ? `\n\n${sender.signature}` : "",
                 });
               }}
             >

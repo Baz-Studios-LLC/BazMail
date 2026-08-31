@@ -204,6 +204,7 @@ impl Engine {
                 } else {
                     Connection::Token
                 },
+                signature: a.signature.clone(),
             })
             .collect()
     }
@@ -228,6 +229,23 @@ impl Engine {
             // the menu item is simply disabled.
             if let Some(to) = to {
                 config.accounts.swap(at, to);
+            }
+        })
+    }
+
+    /// Sets the signature appended to new messages from an account.
+    ///
+    /// Empty clears it rather than storing an empty string, so "no signature"
+    /// has one representation instead of two that behave the same.
+    pub fn set_account_signature(&self, account_id: &str, signature: &str) -> Result<()> {
+        let trimmed = signature.trim_end().to_string();
+        self.mutate_config(|config| {
+            if let Some(account) = config.accounts.iter_mut().find(|a| a.id == account_id) {
+                account.signature = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.clone())
+                };
             }
         })
     }
@@ -561,6 +579,59 @@ impl Engine {
             .await
     }
 
+    /// Moves a message to Trash.
+    ///
+    /// It leaves every mailbox it is actually in rather than just the inbox.
+    /// Deleting from Archive or Spam is the common case — those are exactly
+    /// the places people delete from — and removing only the inbox would leave
+    /// the message in two places at once.
+    pub async fn trash(&self, account_id: &str, email_id: &str) -> Result<ArchiveOutcome> {
+        let trash = self.mailbox_by_role(account_id, "trash")?;
+        let current: Vec<String> = self
+            .store
+            .lock()
+            .unwrap()
+            .mailboxes_of(account_id, email_id)?
+            .into_iter()
+            .filter(|id| *id != trash)
+            .collect();
+
+        self.move_message(account_id, email_id, "trash", &[trash], &current)
+            .await
+    }
+
+    /// Flags or unflags a message.
+    ///
+    /// Same shape as marking read: the mirror first, the queue second, the
+    /// network last, so the star fills on the same frame as the keypress.
+    pub async fn set_flagged(&self, account_id: &str, email_id: &str, flagged: bool) -> Result<()> {
+        let flag = vec!["$flagged".to_string()];
+        let (add, remove) = if flagged {
+            (flag, Vec::new())
+        } else {
+            (Vec::new(), flag)
+        };
+
+        {
+            let store = self.store.lock().unwrap();
+            store.set_flagged(account_id, email_id, flagged)?;
+            store.enqueue_full(
+                account_id,
+                email_id,
+                if flagged { "flag" } else { "unflag" },
+                &[],
+                &[],
+                &add,
+                &remove,
+            )?;
+        }
+
+        // Recorded and queued already, so a network failure here is a retry
+        // rather than something worth interrupting anyone about.
+        let _ = self.flush_outbox().await;
+        Ok(())
+    }
+
     async fn move_message(
         &self,
         account_id: &str,
@@ -730,6 +801,7 @@ impl Engine {
             color: color.clone(),
             identity: username.clone(),
             connection: Connection::Oauth,
+            signature: None,
         };
 
         self.mutate_config(|config| {
@@ -741,6 +813,7 @@ impl Engine {
                 session_url,
                 token: None,
                 token_env: None,
+                signature: None,
                 client_id: Some(pending.client_id),
                 imap: None,
             })
@@ -827,6 +900,7 @@ impl Engine {
             color: color.clone(),
             identity: username.clone(),
             connection: Connection::Imap,
+            signature: None,
         };
 
         self.mutate_config(|config| {
@@ -838,6 +912,7 @@ impl Engine {
                 session_url: String::new(),
                 token: None,
                 token_env: None,
+                signature: None,
                 client_id: None,
                 imap: Some(ImapConfig {
                     host,
@@ -908,6 +983,7 @@ impl Engine {
                 session_url,
                 token: None,
                 token_env: None,
+                signature: None,
                 client_id: None,
                 imap: None,
             })

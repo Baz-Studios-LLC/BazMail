@@ -63,6 +63,16 @@ export function Settings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  async function saveSignature(accountId: string, signature: string) {
+    setError(null);
+    try {
+      await api.setAccountSignature(accountId, signature);
+      onChanged();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function recolor(accountId: string, color: string) {
     setError(null);
     try {
@@ -223,9 +233,31 @@ export function Settings({
 
       {tab === "composing" && (
         <section className="settings-section">
-          <p className="setup-note">
-            Nothing here yet. Signatures, the default sending account and reply
-            behaviour land with composing.
+          {accounts.length === 0 && (
+            <p className="setup-note">No accounts connected yet.</p>
+          )}
+          {accounts.map((account) => (
+            <label className="field" key={account.id}>
+              <span className="field-label">
+                <span className="dot" style={{ background: account.color }} />{" "}
+                {account.identity}
+              </span>
+              <textarea
+                className="field-input signature-input"
+                defaultValue={account.signature ?? ""}
+                placeholder="No signature"
+                spellCheck={false}
+                // Saved on blur rather than per keystroke: a signature is
+                // written in one go, and saving each character would rewrite
+                // config.json dozens of times a sentence.
+                onBlur={(e) => void saveSignature(account.id, e.target.value)}
+              />
+            </label>
+          ))}
+          <p className="setup-aside">
+            Added to new messages and replies from that account. Per account
+            rather than one for everything, because a work signature on personal
+            mail is worse than none at all.
           </p>
         </section>
       )}

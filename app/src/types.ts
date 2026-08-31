@@ -13,6 +13,8 @@ export interface Account {
    * password typed again, because it was never kept anywhere readable.
    */
   connection: "oauth" | "imap" | "token";
+  /** Appended to new messages from this account. */
+  signature: string | null;
 }
 
 export interface Mailbox {

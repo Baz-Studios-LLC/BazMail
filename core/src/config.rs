@@ -27,6 +27,12 @@ pub struct AccountConfig {
     /// Name of an environment variable holding the token. Takes precedence.
     #[serde(default)]
     pub token_env: Option<String>,
+    /// Appended to new messages sent from this account.
+    ///
+    /// Per account rather than global, because that is the only way it can be
+    /// right: a work signature on personal mail is worse than none at all.
+    #[serde(default)]
+    pub signature: Option<String>,
     /// Present when the account was connected with OAuth. Not a secret — a
     /// public client has no secret to keep — so it lives here rather than in the
     /// credential store. Its presence is what marks the account as OAuth: the
@@ -154,9 +160,21 @@ impl Config {
 
     /// Adds or replaces an account by id. Replacing is how re-authenticating
     /// works, so it must not duplicate the entry.
-    pub fn upsert(&mut self, account: AccountConfig) {
+    /// Adds an account, or replaces one that already exists.
+    ///
+    /// Settings the caller does not know about are carried across rather than
+    /// overwritten. Reconnecting rebuilds an `AccountConfig` from what the
+    /// sign-in flow has to hand — which is the credential and the address, not
+    /// the signature someone wrote months ago. Replacing wholesale would erase
+    /// it, and the erasure would look like the reconnect having worked.
+    pub fn upsert(&mut self, mut account: AccountConfig) {
         match self.accounts.iter_mut().find(|a| a.id == account.id) {
-            Some(existing) => *existing = account,
+            Some(existing) => {
+                if account.signature.is_none() {
+                    account.signature = existing.signature.take();
+                }
+                *existing = account;
+            }
             None => self.accounts.push(account),
         }
     }
@@ -196,6 +214,7 @@ mod tests {
             session_url: default_session_url(),
             token: None,
             token_env: None,
+            signature: None,
             client_id: None,
             imap: None,
         }
@@ -203,6 +222,23 @@ mod tests {
 
     fn temp_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("bazmail-{name}-{}.json", std::process::id()))
+    }
+
+    #[test]
+    fn reconnecting_keeps_a_signature_the_sign_in_flow_never_saw() {
+        let mut config = Config::default();
+        let mut original = account("example");
+        original.signature = Some("— Sam".into());
+        config.upsert(original);
+
+        // What a reconnect builds: credentials and address, nothing else.
+        config.upsert(account("example"));
+
+        assert_eq!(
+            config.accounts[0].signature.as_deref(),
+            Some("— Sam"),
+            "reconnecting must not erase settings it does not know about"
+        );
     }
 
     #[test]

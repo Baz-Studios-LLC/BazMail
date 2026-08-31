@@ -247,6 +247,39 @@ async fn archive(
 }
 
 #[tauri::command]
+async fn trash(
+    engine: State<'_, Engine>,
+    account_id: String,
+    email_id: String,
+) -> CmdResult<ArchiveOutcome> {
+    engine.trash(&account_id, &email_id).await.map_err(fail)
+}
+
+#[tauri::command]
+async fn set_flagged(
+    engine: State<'_, Engine>,
+    account_id: String,
+    email_id: String,
+    flagged: bool,
+) -> CmdResult<()> {
+    engine
+        .set_flagged(&account_id, &email_id, flagged)
+        .await
+        .map_err(fail)
+}
+
+#[tauri::command]
+fn set_account_signature(
+    engine: State<'_, Engine>,
+    account_id: String,
+    signature: String,
+) -> CmdResult<()> {
+    engine
+        .set_account_signature(&account_id, &signature)
+        .map_err(fail)
+}
+
+#[tauri::command]
 async fn unarchive(
     engine: State<'_, Engine>,
     account_id: String,
@@ -333,6 +366,9 @@ pub fn run() {
             send,
             mark_read,
             unarchive,
+            trash,
+            set_flagged,
+            set_account_signature,
             flush_outbox,
             connect_fastmail,
             connect_imap,

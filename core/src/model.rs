@@ -24,6 +24,9 @@ pub struct Account {
     /// account needs its app password typed again — we never kept it anywhere
     /// we could read back.
     pub connection: Connection,
+    /// Appended to new messages from this account, when set.
+    #[serde(default)]
+    pub signature: Option<String>,
 }
 
 /// How an account proves who it is.

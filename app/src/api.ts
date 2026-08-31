@@ -56,6 +56,16 @@ export const api = {
     invoke<ArchiveOutcome>("archive", { accountId, emailId }),
   unarchive: (accountId: string, emailId: string) =>
     invoke<ArchiveOutcome>("unarchive", { accountId, emailId }),
+
+  /** Moves a message to Trash, out of every mailbox it is currently in. */
+  trash: (accountId: string, emailId: string) =>
+    invoke<ArchiveOutcome>("trash", { accountId, emailId }),
+
+  setFlagged: (accountId: string, emailId: string, flagged: boolean) =>
+    invoke<void>("set_flagged", { accountId, emailId, flagged }),
+
+  setAccountSignature: (accountId: string, signature: string) =>
+    invoke<void>("set_account_signature", { accountId, signature }),
   flushOutbox: () => invoke<number>("flush_outbox"),
   /**
    * The whole OAuth sign-in. Opens the system browser and resolves once the

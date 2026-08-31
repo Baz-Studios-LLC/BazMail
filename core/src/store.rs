@@ -281,6 +281,29 @@ impl Store {
     /// This is the optimistic half: the row moves before the server is told, so
     /// the list updates on the same frame as the keypress. Sync reconciles later
     /// and the server wins if they disagree.
+    /// Which mailboxes a message currently sits in.
+    ///
+    /// Trashing needs this: a message has to leave wherever it actually is, not
+    /// just the inbox, or deleting from Archive or Spam leaves it in both
+    /// places at once.
+    pub fn mailboxes_of(&self, account_id: &str, email_id: &str) -> Result<Vec<String>> {
+        let current: String = self.conn.query_row(
+            "SELECT mailbox_ids FROM envelopes WHERE account_id = ?1 AND id = ?2",
+            params![account_id, email_id],
+            |row| row.get(0),
+        )?;
+        Ok(serde_json::from_str(&current).unwrap_or_default())
+    }
+
+    /// Flags or unflags a message in the mirror.
+    pub fn set_flagged(&self, account_id: &str, email_id: &str, flagged: bool) -> Result<()> {
+        self.conn.execute(
+            "UPDATE envelopes SET is_flagged = ?1 WHERE account_id = ?2 AND id = ?3",
+            params![flagged as i32, account_id, email_id],
+        )?;
+        Ok(())
+    }
+
     pub fn apply_mailbox_change(
         &self,
         account_id: &str,
