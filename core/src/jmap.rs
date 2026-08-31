@@ -191,7 +191,13 @@ impl JmapClient {
                         "#ids": { "resultOf": "q0", "name": "Email/query", "path": "/ids" },
                         "properties": [
                             "id", "threadId", "mailboxIds", "keywords", "from", "to",
-                            "subject", "receivedAt", "preview", "hasAttachment"
+                            "subject", "receivedAt", "preview", "hasAttachment",
+                            // :all, not the default. JMAP returns the *last*
+                            // header of a given name, and a message can carry
+                            // several Authentication-Results — including ones
+                            // the sender wrote. The provider's is the topmost,
+                            // so we need the whole list to take the first.
+                            "header:Authentication-Results:asText:all"
                         ]
                     },
                     "g0"
@@ -380,6 +386,8 @@ struct JmapEmail {
     preview: Option<String>,
     #[serde(default)]
     has_attachment: bool,
+    #[serde(default, rename = "header:Authentication-Results:asText:all")]
+    authentication_results: Option<Vec<String>>,
 }
 
 impl JmapEmail {
@@ -408,6 +416,14 @@ impl JmapEmail {
             preview: self.preview.unwrap_or_default(),
             received_at: self.received_at.unwrap_or_default(),
             has_attachment: self.has_attachment,
+            // First, not last: headers are prepended as a message is handled,
+            // so the topmost was added by our own provider.
+            verified_domain: self
+                .authentication_results
+                .as_ref()
+                .and_then(|all| all.first())
+                .map(|header| crate::auth::parse(header))
+                .and_then(|verdict| verdict.verified_domain().map(str::to_owned)),
             account_id: account_id.to_string(),
             id: self.id,
         }

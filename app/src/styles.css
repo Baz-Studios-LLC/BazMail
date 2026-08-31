@@ -1098,6 +1098,34 @@ button.avatar-me.open {
   margin: 4px 6px;
 }
 
+/* The unread filter. Quiet until it is on, then it holds the accent — an
+   active filter changes what you are looking at, so it has to be obvious that
+   the list is not showing everything. */
+.pane-filter {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-lo);
+  cursor: pointer;
+}
+
+.pane-filter:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-mid);
+}
+
+.pane-filter.on {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
 /* The blocked-images bar. Sits between the header and the body, styled as
    information rather than as an error: nothing has gone wrong, the app is
    telling you what it declined to fetch. */

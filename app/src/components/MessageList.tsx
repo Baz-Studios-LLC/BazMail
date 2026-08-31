@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Account, Envelope } from "../types";
 import { decodeEntities, displayName, formatWhen, initials } from "../types";
-import { PaperclipIcon } from "./Icons";
+import { FilterIcon, PaperclipIcon } from "./Icons";
 
 interface MessageListProps {
   title: string;
@@ -9,6 +9,8 @@ interface MessageListProps {
   accounts: Account[];
   selectedId: string | null;
   onSelect: (envelope: Envelope) => void;
+  unreadOnly: boolean;
+  onToggleUnreadOnly: () => void;
 }
 
 export function MessageList({
@@ -17,6 +19,8 @@ export function MessageList({
   accounts,
   selectedId,
   onSelect,
+  unreadOnly,
+  onToggleUnreadOnly,
 }: MessageListProps) {
   const colors = Object.fromEntries(accounts.map((a) => [a.id, a.color]));
   const selectedRef = useRef<HTMLButtonElement | null>(null);
@@ -36,10 +40,21 @@ export function MessageList({
         <div style={{ flexGrow: 1, display: "flex", flexDirection: "column", gap: 1 }}>
           <div className="pane-title">{title}</div>
           <div className="pane-sub">
-            {unread} unread
+            {unreadOnly ? `${unread} unread · filtered` : `${unread} unread`}
             {accountCount > 1 && ` · ${accountCount} accounts`}
           </div>
         </div>
+
+        {/* The block above grows, so this sits hard right. */}
+        <button
+          className={`pane-filter ${unreadOnly ? "on" : ""}`}
+          onClick={onToggleUnreadOnly}
+          aria-pressed={unreadOnly}
+          title={unreadOnly ? "Showing unread only" : "Show unread only"}
+          aria-label={unreadOnly ? "Showing unread only" : "Show unread only"}
+        >
+          <FilterIcon size={15} />
+        </button>
       </header>
 
       <div className="rows">

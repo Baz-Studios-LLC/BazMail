@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import type { Account, EmailBody, Envelope, Mailbox, Status } from "./types";
 import { Sidebar, type View } from "./components/Sidebar";
@@ -46,6 +46,9 @@ export default function App() {
     const stored = Number(localStorage.getItem("bazmail.markReadDelay"));
     return Number.isFinite(stored) && stored !== 0 ? stored : 900;
   });
+  const [unreadOnly, setUnreadOnly] = useState(
+    () => localStorage.getItem("bazmail.unreadOnly") === "true",
+  );
   // The last archive, so Z can reverse it. Undo re-issues the opposite move
   // rather than cancelling the queued one, so it works whether or not the
   // archive already reached the server.
@@ -232,6 +235,20 @@ export default function App() {
     }
   }, [lastArchived, loadFromStore, view, accounts]);
 
+  // Filtering to unread is a reading mode, not a one-off, so it survives a
+  // restart the way the mark-read delay does.
+  const visibleEnvelopes = useMemo(
+    () =>
+      unreadOnly
+        // The open message stays in the list even once it has been read.
+        // Without this it vanishes under the cursor a second after opening —
+        // the dwell timer marks it read — and you lose your place in the
+        // middle of reading it.
+        ? envelopes.filter((e) => e.isUnread || e.id === selectedId)
+        : envelopes,
+    [envelopes, unreadOnly, selectedId],
+  );
+
   // The triage loop: j / k move, e archives and advances, z undoes.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -257,18 +274,20 @@ export default function App() {
       if (event.key !== "j" && event.key !== "k") return;
 
       event.preventDefault();
-      if (envelopes.length === 0) return;
+      if (visibleEnvelopes.length === 0) return;
 
-      const current = envelopes.findIndex((e) => e.id === selectedId);
+      const current = visibleEnvelopes.findIndex((e) => e.id === selectedId);
       const step = event.key === "j" ? 1 : -1;
       const nextIndex =
-        current < 0 ? 0 : Math.min(envelopes.length - 1, Math.max(0, current + step));
-      void openMessage(envelopes[nextIndex]);
+        current < 0
+          ? 0
+          : Math.min(visibleEnvelopes.length - 1, Math.max(0, current + step));
+      void openMessage(visibleEnvelopes[nextIndex]);
     };
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [envelopes, selectedId, openMessage, archiveSelected, undoArchive]);
+  }, [visibleEnvelopes, selectedId, openMessage, archiveSelected, undoArchive]);
 
   const unreadTotal = envelopes.filter((e) => e.isUnread).length;
 
@@ -317,10 +336,16 @@ export default function App() {
       <div className="card">
         <MessageList
           title={view.title}
-          envelopes={envelopes}
+          envelopes={visibleEnvelopes}
           accounts={accounts}
           selectedId={selectedId}
           onSelect={(envelope) => void openMessage(envelope)}
+          unreadOnly={unreadOnly}
+          onToggleUnreadOnly={() => {
+            const next = !unreadOnly;
+            setUnreadOnly(next);
+            localStorage.setItem("bazmail.unreadOnly", String(next));
+          }}
         />
 
         <section className="reader">

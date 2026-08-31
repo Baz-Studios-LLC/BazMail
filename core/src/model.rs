@@ -75,6 +75,14 @@ pub struct Envelope {
     pub is_unread: bool,
     pub is_flagged: bool,
     pub has_attachment: bool,
+    /// The domain this message is *proven* to come from, when the provider's
+    /// DMARC check passed. `None` covers both "checked and failed" and "no
+    /// verdict at all", because the caller treats them the same: neither can
+    /// support an offer to trust a sender.
+    ///
+    /// See `auth.rs` for why this is read rather than computed.
+    #[serde(default)]
+    pub verified_domain: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -165,7 +165,11 @@ impl ImapClient {
 
         // BODY.PEEK leaves \Seen alone — plain BODY[] would mark everything read
         // just by listing the mailbox.
-        let query = "(UID ENVELOPE FLAGS INTERNALDATE BODY.PEEK[TEXT]<0.400>)";
+        // Headers come along for the verdict in Authentication-Results. They
+        // are a few kilobytes each, which is a real cost, but the same fetch is
+        // what References and In-Reply-To will need for threading — so this is
+        // paid once rather than twice.
+        let query = "(UID ENVELOPE FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.400>)";
         let mut fetches = session.fetch(&range, query).await?;
 
         let mut out = Vec::new();
@@ -189,6 +193,16 @@ impl ImapClient {
                 .map(|d| d.to_rfc3339())
                 .unwrap_or_default();
 
+            let verified_domain = fetch
+                .header()
+                .and_then(|raw| std::str::from_utf8(raw).ok())
+                .and_then(|raw| crate::auth::first_header(raw, "Authentication-Results"))
+                .and_then(|header| {
+                    crate::auth::parse(&header)
+                        .verified_domain()
+                        .map(str::to_owned)
+                });
+
             out.push(Envelope {
                 id: message_id(mailbox, uid_validity, uid),
                 account_id: account_id.to_string(),
@@ -196,6 +210,7 @@ impl ImapClient {
                 // until the JWZ pass lands.
                 thread_id: message_id(mailbox, uid_validity, uid),
                 mailbox_ids: vec![mailbox.to_string()],
+                verified_domain,
                 from: addresses(envelope.from.as_deref()),
                 to: addresses(envelope.to.as_deref()),
                 subject: decoded(envelope.subject.as_deref()),

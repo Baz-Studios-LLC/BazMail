@@ -37,6 +37,12 @@ export interface Envelope {
   isUnread: boolean;
   isFlagged: boolean;
   hasAttachment: boolean;
+  /**
+   * The domain this message is proven to come from, when the provider's DMARC
+   * check passed. Null covers both "failed" and "no verdict" — neither can
+   * support offering to trust a sender.
+   */
+  verifiedDomain: string | null;
 }
 
 export interface EmailBody {

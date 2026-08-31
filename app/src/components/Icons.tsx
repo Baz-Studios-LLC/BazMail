@@ -94,6 +94,12 @@ export const SettingsIcon = ({ size = 16, className }: IconProps) => (
   </svg>
 );
 
+export const FilterIcon = ({ size = 16, className }: IconProps) => (
+  <svg {...base(size)} className={className}>
+    <path d="M4 6h16l-6.2 7.2V19l-3.6-2v-3.8Z" />
+  </svg>
+);
+
 export const ImageIcon = ({ size = 16, className }: IconProps) => (
   <svg {...base(size)} className={className}>
     <rect x="3" y="4.5" width="18" height="15" rx="2.5" />

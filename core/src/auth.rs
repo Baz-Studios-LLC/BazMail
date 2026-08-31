@@ -90,6 +90,31 @@ pub fn parse(header: &str) -> Authentication {
     }
 }
 
+/// The first occurrence of a header in a raw RFC 5322 block, unfolded.
+///
+/// "First" is load-bearing: headers are prepended as a message travels, so the
+/// topmost `Authentication-Results` is the one our own provider wrote and any
+/// below it may have been forged by the sender. Continuation lines (those
+/// starting with space or tab) belong to the header above them and are joined
+/// back on, since a long verdict is routinely wrapped.
+pub fn first_header(raw: &str, name: &str) -> Option<String> {
+    let prefix = format!("{}:", name.to_ascii_lowercase());
+    let mut lines = raw.lines();
+
+    let first = lines.find(|line| line.to_ascii_lowercase().starts_with(&prefix))?;
+    let mut value = first[prefix.len()..].trim().to_string();
+
+    for line in lines {
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            break;
+        }
+        value.push(' ');
+        value.push_str(line.trim());
+    }
+
+    Some(value)
+}
+
 /// Removes RFC 5322 comments, which may nest and routinely contain `;` and `=`.
 ///
 /// `dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=apple.com` would
@@ -148,6 +173,22 @@ mod tests {
         // result to the visible From, so this must not verify.
         let got = parse("mx.example.net; spf=pass smtp.mailfrom=bounces.sender.net; dkim=pass header.d=sender.net");
         assert_eq!(got, Authentication::Unknown);
+    }
+
+    #[test]
+    fn takes_the_topmost_header_and_unfolds_it() {
+        let raw = "Received: from somewhere
+Authentication-Results: mx.example.net;
+	dmarc=pass header.from=apple.com
+Authentication-Results: forged.example; dmarc=pass header.from=evil.example
+Subject: hello
+";
+        let header = first_header(raw, "Authentication-Results").expect("header found");
+        assert_eq!(
+            parse(&header).verified_domain(),
+            Some("apple.com"),
+            "the sender's own forged header sits below ours and must not win"
+        );
     }
 
     #[test]
