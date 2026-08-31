@@ -252,6 +252,15 @@ impl ImapClient {
                 received_at,
                 is_unread,
                 is_flagged,
+                message_id: parsed
+                    .as_ref()
+                    .and_then(|m| m.message_id())
+                    .map(str::to_owned),
+                references: parsed
+                    .as_ref()
+                    .and_then(|m| m.references().as_text_list())
+                    .map(|list| list.iter().map(|r| r.to_string()).collect())
+                    .unwrap_or_default(),
                 has_attachment: false,
             });
         }

@@ -112,6 +112,8 @@ impl Store {
             "ALTER TABLE outbox ADD COLUMN add_flags TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE outbox ADD COLUMN remove_flags TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE envelopes ADD COLUMN verified_domain TEXT",
+            "ALTER TABLE envelopes ADD COLUMN message_id TEXT",
+            "ALTER TABLE envelopes ADD COLUMN references_json TEXT NOT NULL DEFAULT '[]'",
         ] {
             let _ = self.conn.execute(column, []);
         }
@@ -177,8 +179,8 @@ impl Store {
             "INSERT INTO envelopes
                 (account_id, id, thread_id, mailbox_ids, from_json, to_json,
                  subject, preview, received_at, is_unread, is_flagged, has_attachment,
-                 verified_domain)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                 verified_domain, message_id, references_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT(account_id, id) DO UPDATE SET
                 thread_id = excluded.thread_id,
                 mailbox_ids = excluded.mailbox_ids,
@@ -190,7 +192,9 @@ impl Store {
                 is_unread = excluded.is_unread,
                 is_flagged = excluded.is_flagged,
                 has_attachment = excluded.has_attachment,
-                verified_domain = excluded.verified_domain",
+                verified_domain = excluded.verified_domain,
+                message_id = excluded.message_id,
+                references_json = excluded.references_json",
         )?;
         for e in envelopes {
             stmt.execute(params![
@@ -207,6 +211,8 @@ impl Store {
                 e.is_flagged as i32,
                 e.has_attachment as i32,
                 e.verified_domain,
+                e.message_id,
+                serde_json::to_string(&e.references).unwrap_or_else(|_| "[]".into()),
             ])?;
         }
         Ok(())
@@ -218,7 +224,7 @@ impl Store {
         let mut stmt = self.conn.prepare_cached(
             "SELECT account_id, id, thread_id, mailbox_ids, from_json, to_json,
                     subject, preview, received_at, is_unread, is_flagged, has_attachment,
-                    verified_domain
+                    verified_domain, message_id, references_json
              FROM envelopes ORDER BY received_at DESC LIMIT ?1",
         )?;
         // Over-fetch, then filter in Rust: mailbox membership is a JSON array, and
@@ -246,6 +252,12 @@ impl Store {
                 is_flagged: row.get::<_, i32>(10)? != 0,
                 has_attachment: row.get::<_, i32>(11)? != 0,
                 verified_domain: row.get(12)?,
+                message_id: row.get(13)?,
+                references: row
+                    .get::<_, String>(14)
+                    .ok()
+                    .and_then(|j| serde_json::from_str(&j).ok())
+                    .unwrap_or_default(),
             })
         })?;
 
@@ -416,6 +428,8 @@ mod tests {
             is_flagged: false,
             has_attachment: true,
             verified_domain: None,
+            message_id: None,
+            references: Vec::new(),
         }
     }
 

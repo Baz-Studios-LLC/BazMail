@@ -99,6 +99,14 @@ pub struct Envelope {
     /// See `auth.rs` for why this is read rather than computed.
     #[serde(default)]
     pub verified_domain: Option<String>,
+    /// RFC 5322 Message-ID. A reply without it starts a new conversation in
+    /// every client that threads properly, so it is carried even though
+    /// nothing displays it.
+    #[serde(default)]
+    pub message_id: Option<String>,
+    /// The References chain, which a reply extends rather than replaces.
+    #[serde(default)]
+    pub references: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +115,36 @@ pub struct EmailBody {
     pub id: String,
     pub html: Option<String>,
     pub text: Option<String>,
+}
+
+/// A message on its way out.
+///
+/// Deliberately not an `Envelope`: an envelope describes something that exists
+/// on a server and has an id, a thread and a mailbox. This has none of those
+/// yet, and pretending otherwise would mean half its fields were lies until
+/// the send succeeded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Outgoing {
+    /// Our account id, which decides both who it comes from and how it goes.
+    pub account_id: String,
+    pub to: Vec<EmailAddress>,
+    #[serde(default)]
+    pub cc: Vec<EmailAddress>,
+    #[serde(default)]
+    pub bcc: Vec<EmailAddress>,
+    pub subject: String,
+    /// Plain text only for now. HTML composition is a separate decision, and
+    /// shipping a text-only reply is better than shipping a half-safe editor.
+    pub text: String,
+    /// The Message-ID being replied to, if any. Without it a reply starts a new
+    /// conversation in every client that threads properly.
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
+    /// The References chain, so the reply lands in the right thread even where
+    /// In-Reply-To alone is not enough.
+    #[serde(default)]
+    pub references: Vec<String>,
 }
 
 /// Where a thread sits in the triage model — computed, never stored on the

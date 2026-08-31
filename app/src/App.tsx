@@ -9,6 +9,7 @@ import { Reader } from "./components/Reader";
 import { TitleBar } from "./components/TitleBar";
 import { SignIn } from "./components/SignIn";
 import { Settings } from "./components/Settings";
+import { Compose, type Draft } from "./components/Compose";
 import { AvatarMenu } from "./components/AvatarMenu";
 import {
   CalendarIcon,
@@ -55,6 +56,9 @@ export default function App() {
   // adding: the id, label and colour all survive, so the unified list does not
   // reshuffle underneath you and archived mail keeps its account.
   const [reconnecting, setReconnecting] = useState<Account | null>(null);
+  // Non-null while composing. Holds the whole draft so switching to a
+  // message and back does not lose what was typed.
+  const [draft, setDraft] = useState<Draft | null>(null);
   const { state: updateState, checkNow } = useUpdater();
   // Remembered across restarts: a column width is a preference, and
   // re-dragging it every launch would make it a chore instead.
@@ -191,12 +195,12 @@ export default function App() {
   // claims something is open that is not. Clearing it also means j/k resume from
   // the top rather than from a message you can no longer see.
   useEffect(() => {
-    if (showSettings || signingIn) {
+    if (showSettings || signingIn || draft) {
       setSelectedId(null);
       setBody(null);
       setBodyError(null);
     }
-  }, [showSettings, signingIn]);
+  }, [showSettings, signingIn, draft]);
 
   // Marking read is deferred rather than immediate. j/k opens as it moves, so
   // marking on open would mark everything you scroll past — the classic way this
@@ -248,6 +252,47 @@ export default function App() {
       }
     },
     [accounts, loadFromStore],
+  );
+
+  /**
+   * Opens a reply to the selected message.
+   *
+   * `all` keeps everyone who was on it minus yourself — replying to a list and
+   * quietly dropping the other recipients is the kind of thing that only shows
+   * up after the conversation has already split in two.
+   */
+  const replyTo = useCallback(
+    (envelope: Envelope, all: boolean) => {
+      const account = accounts.find((a) => a.id === envelope.accountId);
+      const me = account?.identity.toLowerCase();
+      const format = (list: { name: string | null; email: string }[]) =>
+        list
+          .filter((a) => a.email.toLowerCase() !== me)
+          .map((a) => (a.name ? `${a.name} <${a.email}>` : a.email))
+          .join(", ");
+
+      // References is the existing chain plus the message being answered; a
+      // reply that drops it threads correctly in some clients and not others.
+      const references = [...envelope.references];
+      if (envelope.messageId && !references.includes(envelope.messageId)) {
+        references.push(envelope.messageId);
+      }
+
+      setShowSettings(false);
+      setSigningIn(false);
+      setDraft({
+        accountId: envelope.accountId,
+        to: format(envelope.from),
+        cc: all ? format(envelope.to) : "",
+        subject: /^re:/i.test(envelope.subject)
+          ? envelope.subject
+          : `Re: ${envelope.subject}`,
+        text: "",
+        inReplyTo: envelope.messageId,
+        references,
+      });
+    },
+    [accounts],
   );
 
   /// Archive and advance — the whole triage loop in one keystroke. The row is
@@ -325,6 +370,13 @@ export default function App() {
         setBody(null);
         return;
       }
+      if (event.key === "r" || event.key === "R") {
+        const envelope = envelopes.find((e) => e.id === selectedId);
+        if (!envelope) return;
+        event.preventDefault();
+        replyTo(envelope, event.key === "R");
+        return;
+      }
       if (event.key === "e") {
         event.preventDefault();
         void archiveSelected();
@@ -351,7 +403,7 @@ export default function App() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [visibleEnvelopes, selectedId, openMessage, archiveSelected, undoArchive]);
+  }, [visibleEnvelopes, envelopes, selectedId, openMessage, archiveSelected, undoArchive, replyTo]);
 
   const unreadTotal = envelopes.filter((e) => e.isUnread).length;
 
@@ -434,13 +486,42 @@ export default function App() {
               <span style={{ flexGrow: 1 }}>Search or ask</span>
               <span className="kbd">Ctrl K</span>
             </div>
-            <div className="btn-primary">
+            <button
+              className="btn-primary"
+              disabled={accounts.length === 0}
+              onClick={() => {
+                // Prefer an account that can actually send, so the common case
+                // is not a compose window that refuses at the last step.
+                const sender =
+                  accounts.find((a) => a.connection !== "imap") ?? accounts[0];
+                setShowSettings(false);
+                setSigningIn(false);
+                setDraft({
+                  accountId: sender?.id ?? "",
+                  to: "",
+                  cc: "",
+                  subject: "",
+                  text: "",
+                });
+              }}
+            >
               <ComposeIcon size={15} />
               Compose
-            </div>
+            </button>
           </div>
 
-          {showSettings ? (
+          {draft ? (
+            <Compose
+              accounts={accounts}
+              draft={draft}
+              onClose={() => setDraft(null)}
+              onSent={() => {
+                setDraft(null);
+                setNote("Sent.");
+                void bootstrap();
+              }}
+            />
+          ) : showSettings ? (
             <Settings
               status={status}
               accounts={accounts}
@@ -486,6 +567,7 @@ export default function App() {
               loading={bodyLoading}
               error={bodyError}
               accounts={accounts}
+              onReply={(all) => selected && replyTo(selected, all)}
             />
           )}
 

@@ -33,6 +33,22 @@ export const api = {
   body: (accountId: string, emailId: string) =>
     invoke<EmailBody>("body", { accountId, emailId }),
 
+  /**
+   * Sends a message. Resolves only once the server has accepted it — sending
+   * is the one mutation that is not queued, because a retry that duplicates
+   * mail is worse than one that fails where you can see it.
+   */
+  send: (message: {
+    accountId: string;
+    to: { name: string | null; email: string }[];
+    cc: { name: string | null; email: string }[];
+    bcc: { name: string | null; email: string }[];
+    subject: string;
+    text: string;
+    inReplyTo: string | null;
+    references: string[];
+  }) => invoke<void>("send", { message }),
+
   markRead: (accountId: string, emailId: string, read: boolean) =>
     invoke<void>("mark_read", { accountId, emailId, read }),
 

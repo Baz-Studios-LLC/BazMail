@@ -12,6 +12,9 @@ use std::collections::HashMap;
 
 const CAP_CORE: &str = "urn:ietf:params:jmap:core";
 const CAP_MAIL: &str = "urn:ietf:params:jmap:mail";
+/// Sending is a separate capability from reading, and asking for it on every
+/// request would make a server that cannot send refuse the ones that read.
+const CAP_SUBMISSION: &str = "urn:ietf:params:jmap:submission";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +45,23 @@ impl Session {
             .map(String::as_str)
             .ok_or_else(|| anyhow!("JMAP session exposes no primary mail account"))
     }
+
+    /// The account that sends.
+    ///
+    /// Usually the same as the mail account, but the spec keeps them separate
+    /// and a server is entitled to differ. Falling back to the mail account is
+    /// a guess, which is why it is only a fallback — and an account with
+    /// neither genuinely cannot send, so that is an error rather than a
+    /// silently wrong id.
+    pub fn submission_account_id(&self) -> Result<&str> {
+        self.primary_accounts
+            .get(CAP_SUBMISSION)
+            .or_else(|| self.primary_accounts.get(CAP_MAIL))
+            .map(String::as_str)
+            .ok_or_else(|| {
+                anyhow!("this account cannot send: the session offers no submission account")
+            })
+    }
 }
 
 pub struct JmapClient {
@@ -55,6 +75,15 @@ pub struct JmapClient {
 struct JmapRequest<'a> {
     using: &'a [&'a str],
     method_calls: Vec<Value>,
+}
+
+/// One of an account's sending identities, as `Identity/get` returns it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JmapIdentity {
+    id: String,
+    #[serde(default)]
+    email: String,
 }
 
 #[derive(Deserialize)]
@@ -115,8 +144,15 @@ impl JmapClient {
     }
 
     async fn call(&self, method_calls: Vec<Value>) -> Result<JmapResponse> {
+        self.call_using(&[CAP_CORE, CAP_MAIL], method_calls).await
+    }
+
+    /// Reading and sending are separate JMAP capabilities, and a server only
+    /// accepts a request whose `using` it can satisfy — so asking for
+    /// submission on every call would make a read-only account fail to read.
+    async fn call_using(&self, using: &[&str], method_calls: Vec<Value>) -> Result<JmapResponse> {
         let body = JmapRequest {
-            using: &[CAP_CORE, CAP_MAIL],
+            using,
             method_calls,
         };
         let response = self
@@ -201,6 +237,7 @@ impl JmapClient {
                         "properties": [
                             "id", "threadId", "mailboxIds", "keywords", "from", "to",
                             "subject", "receivedAt", "preview", "hasAttachment",
+                            "messageId", "references",
                             // :all, not the default. JMAP returns the *last*
                             // header of a given name, and a message can carry
                             // several Authentication-Results — including ones
@@ -231,6 +268,137 @@ impl JmapClient {
     /// JMAP patches `mailboxIds` by key rather than replacing the whole set, so
     /// two clients moving the same message into different folders do not clobber
     /// each other's other memberships. `true` adds, `null` removes.
+    /// The identity to send a given address from.
+    ///
+    /// A JMAP account can hold several — aliases, a work address, a role
+    /// account — and the server refuses a submission whose identity does not
+    /// match the From it was given. Matching on the address rather than taking
+    /// the first is what makes sending from an alias work.
+    pub async fn identity_for(&self, address: &str) -> Result<String> {
+        let backend_account = self.session.submission_account_id()?;
+        let response = self
+            .call_using(
+                &[CAP_CORE, CAP_MAIL, CAP_SUBMISSION],
+                vec![json!([
+                    "Identity/get",
+                    { "accountId": backend_account, "ids": Value::Null },
+                    "id0"
+                ])],
+            )
+            .await?;
+
+        let list = response.args("id0")?.get("list").cloned().unwrap_or(json!([]));
+        let identities: Vec<JmapIdentity> =
+            serde_json::from_value(list).context("parsing identities")?;
+
+        identities
+            .iter()
+            .find(|i| i.email.eq_ignore_ascii_case(address))
+            .or_else(|| identities.first())
+            .map(|i| i.id.clone())
+            .ok_or_else(|| {
+                anyhow!("this account has no identity able to send as {address}")
+            })
+    }
+
+    /// Creates the message and submits it in one request.
+    ///
+    /// Both halves travel together on purpose. `EmailSubmission/set` refers to
+    /// the draft by back-reference, so the email is never a real draft sitting
+    /// in a mailbox waiting for a second round trip that might not happen —
+    /// which is how clients leave a copy in Drafts *and* in Sent.
+    ///
+    /// `onSuccessUpdateEmail` files it in Sent and clears the draft keyword
+    /// only if the submission actually succeeded, so a rejected send leaves
+    /// the message where it can be found rather than filed as sent.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send(
+        &self,
+        from: &EmailAddress,
+        identity_id: &str,
+        drafts_mailbox: &str,
+        sent_mailbox: &str,
+        message: &crate::model::Outgoing,
+    ) -> Result<()> {
+        let backend_account = self.session.submission_account_id()?;
+
+        let addresses = |list: &[EmailAddress]| -> Value {
+            Value::Array(
+                list.iter()
+                    .map(|a| json!({ "name": a.name, "email": a.email }))
+                    .collect(),
+            )
+        };
+
+        let mut email = json!({
+            "mailboxIds": { drafts_mailbox: true },
+            "keywords": { "$draft": true },
+            "from": [{ "name": from.name, "email": from.email }],
+            "to": addresses(&message.to),
+            "subject": message.subject,
+            "bodyValues": { "text": { "value": message.text, "charset": "utf-8" } },
+            "textBody": [{ "partId": "text", "type": "text/plain" }]
+        });
+
+        if !message.cc.is_empty() {
+            email["cc"] = addresses(&message.cc);
+        }
+        if !message.bcc.is_empty() {
+            email["bcc"] = addresses(&message.bcc);
+        }
+        if let Some(parent) = &message.in_reply_to {
+            email["inReplyTo"] = json!([parent]);
+        }
+        if !message.references.is_empty() {
+            email["references"] = json!(message.references);
+        }
+
+        let response = self
+            .call_using(
+                &[CAP_CORE, CAP_MAIL, CAP_SUBMISSION],
+                vec![
+                    json!([
+                        "Email/set",
+                        { "accountId": backend_account, "create": { "draft": email } },
+                        "e0"
+                    ]),
+                    json!([
+                        "EmailSubmission/set",
+                        {
+                            "accountId": backend_account,
+                            "create": {
+                                "send": { "emailId": "#draft", "identityId": identity_id }
+                            },
+                            "onSuccessUpdateEmail": {
+                                "#send": {
+                                    format!("mailboxIds/{drafts_mailbox}"): Value::Null,
+                                    format!("mailboxIds/{sent_mailbox}"): true,
+                                    "keywords/$draft": Value::Null
+                                }
+                            }
+                        },
+                        "s0"
+                    ]),
+                ],
+            )
+            .await?;
+
+        // A JMAP method can succeed as a call and still refuse the object it was
+        // given, so notCreated has to be read explicitly — otherwise a rejected
+        // send looks exactly like a sent one.
+        if let Some(failed) = response.args("e0")?.get("notCreated") {
+            if !failed.is_null() && failed.as_object().is_some_and(|o| !o.is_empty()) {
+                anyhow::bail!("the server would not accept the message: {failed}");
+            }
+        }
+        if let Some(failed) = response.args("s0")?.get("notCreated") {
+            if !failed.is_null() && failed.as_object().is_some_and(|o| !o.is_empty()) {
+                anyhow::bail!("the server would not send the message: {failed}");
+            }
+        }
+        Ok(())
+    }
+
     pub async fn set_mailboxes(
         &self,
         email_id: &str,
@@ -395,6 +563,10 @@ struct JmapEmail {
     preview: Option<String>,
     #[serde(default)]
     has_attachment: bool,
+    #[serde(default)]
+    message_id: Option<Vec<String>>,
+    #[serde(default)]
+    references: Option<Vec<String>>,
     #[serde(default, rename = "header:Authentication-Results:asText:all")]
     authentication_results: Option<Vec<String>>,
 }
@@ -425,6 +597,10 @@ impl JmapEmail {
             preview: self.preview.unwrap_or_default(),
             received_at: self.received_at.unwrap_or_default(),
             has_attachment: self.has_attachment,
+            // JMAP models both as lists because a malformed message can
+            // carry several; the first is the one that identifies it.
+            message_id: self.message_id.and_then(|ids| ids.into_iter().next()),
+            references: self.references.unwrap_or_default(),
             // First, not last: headers are prepended as a message is handled,
             // so the topmost was added by our own provider.
             verified_domain: self

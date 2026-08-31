@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Account, EmailBody, Envelope } from "../types";
 import { decodeEntities, displayName, formatWhen } from "../types";
 import { remoteImageHosts, sandboxDocument } from "../api";
-import { ImageIcon, MailIcon } from "./Icons";
+import { ImageIcon, MailIcon, ReplyIcon } from "./Icons";
 
 interface ReaderProps {
   envelope: Envelope | null;
@@ -10,6 +10,8 @@ interface ReaderProps {
   loading: boolean;
   error: string | null;
   accounts: Account[];
+  /** `all` keeps the other recipients on the reply. */
+  onReply: (all: boolean) => void;
 }
 
 /** "a, b and 2 more" — the whole list is in the title attribute. */
@@ -18,7 +20,14 @@ function describeHosts(hosts: string[]): string {
   return `${hosts[0]}, ${hosts[1]} and ${hosts.length - 2} more`;
 }
 
-export function Reader({ envelope, body, loading, error, accounts }: ReaderProps) {
+export function Reader({
+  envelope,
+  body,
+  loading,
+  error,
+  accounts,
+  onReply,
+}: ReaderProps) {
   // Per message, and never remembered. An allow that outlives the message it
   // was granted for is a decision the user did not make.
   const [loadImages, setLoadImages] = useState(false);
@@ -50,6 +59,24 @@ export function Reader({ envelope, body, loading, error, accounts }: ReaderProps
           <span>{displayName(envelope.from)}</span>
           <span className="sep">·</span>
           <span>{formatWhen(envelope.receivedAt)}</span>
+        </div>
+
+        {/* Both offered rather than one behind a modifier: reply-all is the one
+            people get wrong, and hiding it is how a thread ends up split. */}
+        <div className="thread-actions">
+          <button className="btn-quiet" onClick={() => onReply(false)} title="Reply (r)">
+            <ReplyIcon size={14} />
+            Reply
+          </button>
+          {envelope.to.length + envelope.from.length > 2 && (
+            <button
+              className="btn-quiet"
+              onClick={() => onReply(true)}
+              title="Reply to everyone (Shift R)"
+            >
+              Reply all
+            </button>
+          )}
         </div>
       </div>
 

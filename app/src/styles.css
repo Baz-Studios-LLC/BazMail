@@ -1288,6 +1288,28 @@ button.avatar-me.open {
   color: var(--accent);
 }
 
+.thread-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* Compose. The body has to be the tallest thing in the panel — a message is
+   the point, and the fields above it are just addressing. */
+.compose {
+  height: 100%;
+  min-height: 0;
+}
+
+.compose-body {
+  flex-grow: 1;
+  min-height: 240px;
+  resize: none;
+  line-height: 1.6;
+  font-family: inherit;
+  padding: 10px 12px;
+}
+
 /* Settings tabs. They live in the panel header's actions slot, which is what
    that slot was added for — the header is the one piece of chrome every page
    already has, so navigation belongs there rather than eating a row of the

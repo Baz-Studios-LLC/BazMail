@@ -5,7 +5,8 @@
 //! host the identical engine without reimplementing anything.
 
 use bazmail_core::{
-    Account, ArchiveOutcome, Config, EmailBody, Engine, Envelope, Mailbox, VerifiedAccount,
+    Account, ArchiveOutcome, Config, EmailBody, Engine, Envelope, Mailbox, Outgoing,
+    VerifiedAccount,
 };
 use tauri_plugin_opener::OpenerExt;
 use serde::Serialize;
@@ -222,6 +223,11 @@ fn set_account_color(
 }
 
 #[tauri::command]
+async fn send(engine: State<'_, Engine>, message: Outgoing) -> CmdResult<()> {
+    engine.send(&message).await.map_err(fail)
+}
+
+#[tauri::command]
 async fn mark_read(
     engine: State<'_, Engine>,
     account_id: String,
@@ -324,6 +330,7 @@ pub fn run() {
             archive,
             set_account_color,
             move_account,
+            send,
             mark_read,
             unarchive,
             flush_outbox,

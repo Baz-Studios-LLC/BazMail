@@ -19,6 +19,7 @@ pub mod store;
 pub use config::{account_id_from_address, AccountConfig, Config, ImapConfig};
 pub use model::{
     Account, Connection, EmailAddress, EmailBody, Envelope, Lane, Mailbox, Mutation,
+    Outgoing,
 };
 
 use anyhow::{anyhow, Result};
@@ -73,6 +74,36 @@ impl Backend {
         match self {
             Backend::Jmap(c) => c.set_keywords(email_id, add, remove).await,
             Backend::Imap(c) => c.set_flags(email_id, add, remove).await,
+        }
+    }
+
+    /// Sends a message, filing it in Sent if the server accepts it.
+    ///
+    /// The identity lookup lives inside the JMAP arm rather than in the caller
+    /// because it is a JMAP concept — an account there can hold several
+    /// identities and the server rejects a submission whose identity does not
+    /// match its From. SMTP has no equivalent to look up.
+    async fn send(
+        &self,
+        from: &EmailAddress,
+        drafts_mailbox: &str,
+        sent_mailbox: &str,
+        message: &Outgoing,
+    ) -> Result<()> {
+        match self {
+            Backend::Jmap(c) => {
+                let identity = c.identity_for(&from.email).await?;
+                c.send(from, &identity, drafts_mailbox, sent_mailbox, message)
+                    .await
+            }
+            // Reading and sending are different protocols on this path: IMAP
+            // has no send verb at all, and the SMTP client that would provide
+            // one does not exist yet. Saying so plainly beats failing somewhere
+            // deeper with something that reads like a bug.
+            Backend::Imap(_) => anyhow::bail!(
+                "this account reads over IMAP, which cannot send — sending needs SMTP, \
+                 and BazMail does not speak it yet"
+            ),
         }
     }
 
@@ -436,6 +467,42 @@ impl Engine {
             return Ok(Vec::new());
         }
         store.envelopes(&inbox_ids, limit)
+    }
+
+    /// Sends a message and files the result in Sent.
+    ///
+    /// Not queued through the outbox, deliberately. Everything else there is
+    /// idempotent — archiving twice archives once — but sending twice sends
+    /// twice, and a retry loop that duplicates mail is worse than one that
+    /// fails visibly. A proper outbox for sending needs a deduplication key the
+    /// server honours, which is its own piece of work.
+    pub async fn send(&self, message: &Outgoing) -> Result<()> {
+        let identity = self
+            .config
+            .read()
+            .unwrap()
+            .accounts
+            .iter()
+            .find(|a| a.id == message.account_id)
+            .map(|a| a.identity.clone())
+            .ok_or_else(|| anyhow!("no account called '{}'", message.account_id))?;
+
+        let from = EmailAddress {
+            name: None,
+            email: identity,
+        };
+        let drafts = self.mailbox_by_role(&message.account_id, "drafts")?;
+        let sent = self.mailbox_by_role(&message.account_id, "sent")?;
+
+        self.client(&message.account_id)
+            .await?
+            .send(&from, &drafts, &sent, message)
+            .await?;
+
+        // Pull Sent straight away so the message you just sent is visible
+        // rather than absent until whenever the next sync happens.
+        let _ = self.sync_mailbox(&message.account_id, &sent, 50).await;
+        Ok(())
     }
 
     /// Everything the mirror holds for one mailbox, newest first.

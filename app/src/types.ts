@@ -49,6 +49,10 @@ export interface Envelope {
    * support offering to trust a sender.
    */
   verifiedDomain: string | null;
+  /** RFC 5322 Message-ID. Carried so a reply threads rather than starting a
+   *  new conversation. */
+  messageId: string | null;
+  references: string[];
 }
 
 export interface EmailBody {
