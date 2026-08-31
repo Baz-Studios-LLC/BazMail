@@ -128,6 +128,11 @@ export default function App() {
           return;
         }
 
+        // The mirror is a complete copy of what was last synced, so there is no
+        // reason to look at an empty window while the network answers. Paint it
+        // first, then go and find out what changed.
+        await loadFromStore(UNIFIED, s.accounts);
+
         // Anything queued from a previous session goes out before we sync, so
         // the server is not still reporting state the user already changed.
         await api.flushOutbox().catch(() => 0);

@@ -19,6 +19,24 @@ interface SettingsProps {
   onClose: () => void;
 }
 
+/**
+ * Grouped by what a section *is*, not by when it was written.
+ *
+ * "Composing" is listed before it has anything in it and "About" swallows what
+ * were separate Updates and Storage sections — both are facts about this
+ * install rather than things you configure, and splitting them made you look
+ * in two places for one answer.
+ */
+const TABS = [
+  { id: "accounts", label: "Accounts" },
+  { id: "reading", label: "Reading" },
+  { id: "composing", label: "Composing" },
+  { id: "privacy", label: "Privacy" },
+  { id: "about", label: "About" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
 const DELAYS = [
   { ms: 0, label: "Immediately" },
   { ms: 500, label: "After ½ second" },
@@ -40,6 +58,7 @@ export function Settings({
   onClose,
 }: SettingsProps) {
   // Removing an account is not undoable, so it takes two clicks rather than one.
+  const [tab, setTab] = useState<TabId>("accounts");
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +88,30 @@ export function Settings({
   }
 
   return (
-    <Panel title="Settings" onBack={onClose} backLabel="Back to mail">
-
+    <Panel
+      title="Settings"
+      onBack={onClose}
+      backLabel="Back to mail"
+      actions={
+        <nav className="tabs" role="tablist">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              className={`tab ${tab === t.id ? "on" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+      }
+    >
+      {/* No heading inside a tab — the tab is the heading, and repeating it
+          just costs a line at the top of every panel. */}
+      {tab === "accounts" && (
       <section className="settings-section">
-        <h3>Accounts</h3>
         {accounts.length === 0 && (
           <p className="setup-note">No accounts connected yet.</p>
         )}
@@ -157,9 +196,10 @@ export function Settings({
 
         {error && <div className="field-error">{error}</div>}
       </section>
+      )}
 
+      {tab === "reading" && (
       <section className="settings-section">
-        <h3>Reading</h3>
         <label className="field">
           <span className="field-label">Mark as read</span>
           <select
@@ -179,7 +219,30 @@ export function Settings({
           as they move. Marking immediately would mark everything you pass.
         </p>
       </section>
+      )}
 
+      {tab === "composing" && (
+        <section className="settings-section">
+          <p className="setup-note">
+            Nothing here yet. Signatures, the default sending account and reply
+            behaviour land with composing.
+          </p>
+        </section>
+      )}
+
+      {tab === "privacy" && (
+        <section className="settings-section">
+          <p className="setup-note">
+            Remote images are blocked in every message, and each message offers
+            to load them once. Nothing is remembered between messages yet —
+            per-domain permissions will live here, and only for senders whose
+            domain the provider has actually verified.
+          </p>
+        </section>
+      )}
+
+      {tab === "about" && (
+      <>
       <section className="settings-section">
         <h3>Updates</h3>
         <div className="field-row">
@@ -248,6 +311,8 @@ export function Settings({
           </dd>
         </dl>
       </section>
+      </>
+      )}
     </Panel>
   );
 }

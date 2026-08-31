@@ -169,7 +169,7 @@ impl ImapClient {
         // are a few kilobytes each, which is a real cost, but the same fetch is
         // what References and In-Reply-To will need for threading — so this is
         // paid once rather than twice.
-        let query = "(UID ENVELOPE FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.400>)";
+        let query = "(UID ENVELOPE FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.4096>)";
         let mut fetches = session.fetch(&range, query).await?;
 
         let mut out = Vec::new();
@@ -193,6 +193,21 @@ impl ImapClient {
                 .map(|d| d.to_rfc3339())
                 .unwrap_or_default();
 
+            // The IMAP ENVELOPE hands back RFC 2047 encoded-words verbatim and
+            // BODY[TEXT] is still in its transfer encoding, which is why
+            // subjects read as "=?utf-8?B?..." and previews as HTML source.
+            // mail-parser undoes both, and since the headers are already
+            // fetched, re-assembling enough of the message to parse costs
+            // nothing more off the wire.
+            let raw_prefix: Vec<u8> = fetch
+                .header()
+                .into_iter()
+                .chain(fetch.text())
+                .flatten()
+                .copied()
+                .collect();
+            let parsed = mail_parser::MessageParser::default().parse(&raw_prefix);
+
             let verified_domain = fetch
                 .header()
                 .and_then(|raw| std::str::from_utf8(raw).ok())
@@ -211,10 +226,29 @@ impl ImapClient {
                 thread_id: message_id(mailbox, uid_validity, uid),
                 mailbox_ids: vec![mailbox.to_string()],
                 verified_domain,
-                from: addresses(envelope.from.as_deref()),
-                to: addresses(envelope.to.as_deref()),
-                subject: decoded(envelope.subject.as_deref()),
-                preview: preview_from(fetch.text()),
+                // Parsed values win; the raw ENVELOPE stays as the fallback so
+                // a message mail-parser chokes on still shows something rather
+                // than a blank row.
+                from: parsed
+                    .as_ref()
+                    .map(|m| parsed_addresses(m.from()))
+                    .filter(|a| !a.is_empty())
+                    .unwrap_or_else(|| addresses(envelope.from.as_deref())),
+                to: parsed
+                    .as_ref()
+                    .map(|m| parsed_addresses(m.to()))
+                    .filter(|a| !a.is_empty())
+                    .unwrap_or_else(|| addresses(envelope.to.as_deref())),
+                subject: parsed
+                    .as_ref()
+                    .and_then(|m| m.subject())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| decoded(envelope.subject.as_deref())),
+                preview: parsed
+                    .as_ref()
+                    .map(preview_of)
+                    .filter(|p| !p.is_empty())
+                    .unwrap_or_else(|| preview_from(fetch.text())),
                 received_at,
                 is_unread,
                 is_flagged,
@@ -443,6 +477,92 @@ fn addresses(list: Option<&[async_imap::imap_proto::types::Address]>) -> Vec<Ema
 }
 
 /// Squashes a raw body slice into one line of preview text.
+/// Addresses as mail-parser read them, with RFC 2047 names already decoded.
+fn parsed_addresses(address: Option<&mail_parser::Address>) -> Vec<EmailAddress> {
+    fn push(out: &mut Vec<EmailAddress>, addr: &mail_parser::Addr) {
+        let Some(email) = addr.address.as_deref().filter(|e| !e.trim().is_empty()) else {
+            return;
+        };
+        out.push(EmailAddress {
+            name: addr
+                .name
+                .as_deref()
+                .map(str::to_owned)
+                .filter(|n| !n.trim().is_empty()),
+            email: email.to_string(),
+        });
+    }
+
+    let mut out = Vec::new();
+    match address {
+        Some(mail_parser::Address::List(list)) => list.iter().for_each(|a| push(&mut out, a)),
+        Some(mail_parser::Address::Group(groups)) => groups
+            .iter()
+            .flat_map(|g| g.addresses.iter())
+            .for_each(|a| push(&mut out, a)),
+        None => {}
+    }
+    out
+}
+
+/// A one-line preview from a parsed message.
+///
+/// Prefers the plain-text alternative and falls back to stripping tags out of
+/// the HTML one. Only the body is truncated before parsing, so what arrives
+/// here is a real text part rather than the head of a MIME envelope.
+fn preview_of(message: &mail_parser::Message) -> String {
+    let text = message
+        .body_text(0)
+        .map(|c| c.into_owned())
+        .or_else(|| message.body_html(0).map(|c| strip_tags(&c)))
+        .unwrap_or_default();
+
+    text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect()
+}
+
+/// Removes tags and script/style content, so an HTML-only message previews as
+/// its words rather than its markup.
+fn strip_tags(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    let mut skip_to: Option<&str> = None;
+    let lower = html.to_ascii_lowercase();
+
+    let mut i = 0;
+    let bytes = html.as_bytes();
+    while i < bytes.len() {
+        if let Some(close) = skip_to {
+            // Inside <script> or <style>: nothing here is words.
+            if lower[i..].starts_with(close) {
+                skip_to = None;
+                i += close.len();
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        match bytes[i] {
+            b'<' => {
+                if lower[i..].starts_with("<script") {
+                    skip_to = Some("</script>");
+                } else if lower[i..].starts_with("<style") {
+                    skip_to = Some("</style>");
+                } else {
+                    in_tag = true;
+                }
+            }
+            b'>' if in_tag => {
+                in_tag = false;
+                out.push(' ');
+            }
+            _ if !in_tag => out.push(html[i..].chars().next().unwrap_or(' ')),
+            _ => {}
+        }
+        i += html[i..].chars().next().map(char::len_utf8).unwrap_or(1);
+    }
+    out
+}
+
 fn preview_from(text: Option<&[u8]>) -> String {
     let Some(bytes) = text else {
         return String::new();
@@ -461,6 +581,45 @@ fn preview_from(text: Option<&[u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encoded_subjects_are_decoded() {
+        // The exact shape that was reaching the list as literal text.
+        let raw = b"Subject: =?utf-8?B?SGVsbG8gdGhlcmU=?=
+
+body
+";
+        let parsed = mail_parser::MessageParser::default().parse(raw.as_slice()).unwrap();
+        assert_eq!(parsed.subject(), Some("Hello there"));
+    }
+
+    #[test]
+    fn quoted_printable_html_previews_as_words() {
+        // Quoted-printable is why previews read as `tml lang=3D"en"`: the =3D
+        // is an encoded '=' and nothing was decoding it.
+        let raw = b"Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<html lang=3D\"en\"><body><p>Your receipt is ready</p></body></html>
+";
+        let parsed = mail_parser::MessageParser::default().parse(raw.as_slice()).unwrap();
+        let preview = preview_of(&parsed);
+        assert!(
+            preview.contains("Your receipt is ready"),
+            "expected words, got {preview:?}"
+        );
+        assert!(!preview.contains("3D"), "quoted-printable leaked: {preview:?}");
+        assert!(!preview.contains('<'), "markup leaked: {preview:?}");
+    }
+
+    #[test]
+    fn strip_tags_drops_script_and_style_content() {
+        let html = "<style>p{color:red}</style><p>Real text</p><script>alert(1)</script>";
+        let text = strip_tags(html);
+        assert!(text.contains("Real text"));
+        assert!(!text.contains("color"), "style content leaked: {text:?}");
+        assert!(!text.contains("alert"), "script content leaked: {text:?}");
+    }
 
     #[test]
     fn message_ids_round_trip() {
