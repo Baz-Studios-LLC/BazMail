@@ -85,8 +85,15 @@ export function useUpdater() {
     void run();
     const timer = setInterval(() => void run(), CHECK_INTERVAL_MS);
 
-    // Windows only in practice, since macOS installs as soon as it downloads.
-    const stopping = getCurrentWindow().onCloseRequested(async (event) => {
+    // Registered only where it can actually do something. On macOS the install
+    // already happened at download time, so the handler could only ever no-op —
+    // and registering one is not free: Tauri routes the close through
+    // window.destroy() as soon as any listener exists, which turned the red
+    // traffic light into a no-op when that permission was missing. A listener
+    // that cannot act is a liability, not a spare part.
+    const stopping = IS_MAC
+      ? null
+      : getCurrentWindow().onCloseRequested(async (event) => {
       const update = pending.current;
       if (!update) return;
       event.preventDefault();
@@ -104,7 +111,7 @@ export function useUpdater() {
 
     return () => {
       clearInterval(timer);
-      void stopping.then((stop) => stop());
+      void stopping?.then((stop) => stop());
     };
   }, [run]);
 
