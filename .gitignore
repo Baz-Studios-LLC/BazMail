@@ -1,0 +1,22 @@
+# Rust
+/target
+**/target
+
+# Node
+node_modules
+app/dist
+
+# Tauri build output and generated schemas
+app/src-tauri/gen/schemas/
+
+# Local credentials never belong in the repo — they live in %APPDATA%\BazMail
+# (and ~/Library/Application Support/BazMail on macOS). The tokens themselves
+# are in the OS credential store and never touch disk here at all.
+config.json
+*.db
+*.db-wal
+*.db-shm
+
+# Generated design canvas: 2.5 MB of editor payload re-seeded from the
+# .dc.html sources beside it, which are the actual content.
+design/bazmail.html

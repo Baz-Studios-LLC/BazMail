@@ -1,0 +1,21 @@
+[package]
+name = "bazmail-desktop"
+version.workspace = true
+edition.workspace = true
+description = "BazMail desktop shell"
+
+[lib]
+# The `_lib` suffix keeps the library name distinct from the binary, which
+# otherwise collides on Windows.
+name = "bazmail_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bazmail-core = { path = "../../core" }

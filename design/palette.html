@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BazMail — navy scale</title>
+<style>
+  :root {
+    /* One scale, hue 228, chroma tapering as lightness rises. Steps follow the
+       Radix model: 1–2 backgrounds, 3–5 component states, 6–8 borders,
+       11–12 text. Steps 9–10 are the accent's job, not this scale's. */
+    --n1:  #0c101d;
+    --n2:  #101528;
+    --n3:  #151c37;
+    --n4:  #1c2445;
+    --n5:  #242d51;
+    --n6:  #323b5d;
+    --n7:  #40496d;
+    --n8:  #515c85;
+    --n11: #959dbb;
+    --n12: #e8eaf3;
+
+    --accent: #5aa9f0;
+    --accent-solid: #3d8fdd;
+
+    --t-hi: var(--n12);
+    --t: #c5cadd;
+    --t-mid: #adb3cd;
+    --t-lo: var(--n11);
+    --t-faint: #7e87a9;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 40px 32px 64px;
+    background: var(--n1);
+    color: var(--t);
+    font: 14px/1.6 -apple-system, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  }
+
+  h1 { margin: 0 0 6px; font-size: 20px; color: var(--t-hi); letter-spacing: -0.02em; }
+  h2 { margin: 40px 0 14px; font-size: 13px; color: var(--t-lo); font-weight: 600; }
+  .lede { margin: 0 0 8px; color: var(--t-mid); max-width: 70ch; }
+
+  .scale { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .step { border-radius: 10px; overflow: hidden; border: 1px solid var(--n6); }
+  .chip { height: 74px; }
+  .meta { padding: 9px 11px; background: var(--n2); }
+  .num { font-size: 11px; font-weight: 700; color: var(--t-lo); }
+  .hex { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; color: var(--t-hi); }
+  .role { font-size: 11.5px; color: var(--t-faint); line-height: 1.45; }
+
+  .ramp { display: flex; flex-wrap: wrap; gap: 10px; }
+  .ramp div {
+    padding: 10px 14px; border-radius: 8px; background: var(--n3);
+    font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px;
+  }
+
+  /* --- the chrome, built only from the scale ------------------------------- */
+  .mock {
+    height: 460px; display: flex; border-radius: 12px; overflow: hidden;
+    border: 1px solid var(--n6); max-width: 1100px;
+  }
+  .m-rail {
+    width: 46px; flex-shrink: 0;
+    background: linear-gradient(180deg, var(--n3) 0%, var(--n1) 100%);
+  }
+  .m-main { flex-grow: 1; display: flex; flex-direction: column; background: var(--n5); min-width: 0; }
+  .m-cap { height: 30px; flex-shrink: 0; }
+  .m-body { flex-grow: 1; display: flex; min-height: 0; }
+  .m-side { width: 190px; flex-shrink: 0; padding: 4px 8px; }
+  .m-label { font-size: 11px; font-weight: 600; color: var(--t-lo); padding: 6px 8px; }
+  .m-item { padding: 7px 9px; border-radius: 7px; color: var(--t); font-size: 13px; }
+  .m-item.on { background: rgba(90, 169, 240, 0.22); color: var(--t-hi); font-weight: 600; }
+  .m-pane { flex-grow: 1; display: flex; padding: 8px 8px 8px 0; min-width: 0; }
+  .m-card {
+    flex-grow: 1; border-radius: 10px; display: flex; overflow: hidden;
+    background: var(--n2); border: 1px solid var(--n6);
+  }
+  .m-list { width: 240px; flex-shrink: 0; border-right: 1px solid var(--n6); padding: 6px; }
+  .m-row { padding: 9px 10px; border-radius: 8px; }
+  .m-row.sel { background: rgba(90, 169, 240, 0.16); }
+  .m-from { font-size: 12.5px; font-weight: 600; color: var(--t-hi); }
+  .m-sub { font-size: 12px; color: var(--t); }
+  .m-prev { font-size: 11.5px; color: var(--t-faint); }
+  .m-read { flex-grow: 1; background: var(--n1); padding: 18px; min-width: 0; }
+  .m-title { font-size: 17px; font-weight: 600; color: var(--t-hi); letter-spacing: -0.02em; }
+  .m-meta { font-size: 11.5px; color: var(--t-lo); margin-top: 5px; }
+  .m-copy { font-size: 13.5px; color: var(--t); margin-top: 16px; max-width: 52ch; }
+
+  table { border-collapse: collapse; width: 100%; max-width: 760px; }
+  td, th { text-align: left; padding: 7px 12px 7px 0; font-size: 13px; border-bottom: 1px solid var(--n6); }
+  th { color: var(--t-lo); font-size: 11.5px; font-weight: 600; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; color: var(--t-hi); }
+  .sw { display: inline-block; width: 13px; height: 13px; border-radius: 3px; vertical-align: -2px; margin-right: 7px; border: 1px solid rgba(255,255,255,0.14); }
+</style>
+</head>
+<body>
+
+<h1>BazMail — navy scale</h1>
+<p class="lede">One scale at hue 228. Step 3 lands within a point of your <code>#141B37</code>; step 6 within
+two of <code>#383E55</code> — so the anchors you picked and the scale agree. Every surface, border and text
+tone below is drawn from these ten values and nothing else.</p>
+
+<h2>THE SCALE</h2>
+<div class="scale">
+  <div class="step"><div class="chip" style="background:var(--n1)"></div><div class="meta"><div class="num">01</div><div class="hex">#0C101D</div><div class="role">App background — darkest. Reading pane, foot of the rail gradient.</div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n2)"></div><div class="meta"><div class="num">02</div><div class="hex">#101528</div><div class="role">Subtle background. The content card.</div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n3)"></div><div class="meta"><div class="num">03</div><div class="hex">#151C37</div><div class="role">Component background. Head of the rail gradient. <em>≈ your #141B37</em></div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n4)"></div><div class="meta"><div class="num">04</div><div class="hex">#1C2445</div><div class="role">Hover state.</div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n5)"></div><div class="meta"><div class="num">05</div><div class="hex">#242D51</div><div class="role">Selected / raised. Colour 2 — sidebar and pane.</div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n6)"></div><div class="meta"><div class="num">06</div><div class="hex">#323B5D</div><div class="role">Subtle border. Hairlines between panes. <em>≈ your #383E55</em></div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n7)"></div><div class="meta"><div class="num">07</div><div class="hex">#40496D</div><div class="role">Interactive border. Inputs.</div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n8)"></div><div class="meta"><div class="num">08</div><div class="hex">#515C85</div><div class="role">Strong border, focus ring.</div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n11)"></div><div class="meta"><div class="num">11</div><div class="hex">#959DBB</div><div class="role">Low-contrast text. Labels, counts, timestamps. 6.3:1 on step 3.</div></div></div>
+  <div class="step"><div class="chip" style="background:var(--n12)"></div><div class="meta"><div class="num">12</div><div class="hex">#E8EAF3</div><div class="role">High-contrast text. Subjects, headings. 14:1 on step 3.</div></div></div>
+</div>
+
+<h2>TEXT RAMP</h2>
+<div class="ramp">
+  <div style="color:var(--t-hi)">--text-hi &nbsp; #E8EAF3</div>
+  <div style="color:var(--t)">--text &nbsp; #C5CADD</div>
+  <div style="color:var(--t-mid)">--text-mid &nbsp; #ADB3CD</div>
+  <div style="color:var(--t-lo)">--text-lo &nbsp; #959DBB</div>
+  <div style="color:var(--t-faint)">--text-faint &nbsp; #7E87A9</div>
+</div>
+
+<h2>THE CHROME, BUILT ONLY FROM THE SCALE</h2>
+<div class="mock">
+  <div class="m-rail"></div>
+  <div class="m-main">
+    <div class="m-cap"></div>
+    <div class="m-body">
+      <div class="m-side">
+        <div class="m-label">Unified</div>
+        <div class="m-item on">Inbox</div>
+        <div class="m-item">Needs you</div>
+        <div class="m-item">Waiting on</div>
+        <div class="m-label" style="margin-top:10px">example.com</div>
+        <div class="m-item">Inbox</div>
+        <div class="m-item">Archive</div>
+      </div>
+      <div class="m-pane">
+        <div class="m-card">
+          <div class="m-list">
+            <div class="m-row"><div class="m-from">Sarah Chen</div><div class="m-sub">Re: Q3 invoice</div><div class="m-prev">Attached the revised one…</div></div>
+            <div class="m-row sel"><div class="m-from">Dave Kimura</div><div class="m-sub">Deck for Thursday</div><div class="m-prev">Can you send the latest…</div></div>
+            <div class="m-row"><div class="m-from">Hover</div><div class="m-sub">example.net renews</div><div class="m-prev">Auto-renews 29 Sep.</div></div>
+          </div>
+          <div class="m-read">
+            <div class="m-title">Deck for Thursday</div>
+            <div class="m-meta">you@example.com · 3 messages · Dave Kimura, you</div>
+            <div class="m-copy">Can you send the latest version of the deck before EOD Wednesday? I want to run it past the team before we're all in the room on Thursday.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>PROPOSED TOKEN MAPPING</h2>
+<table>
+  <tr><th>Token</th><th>Step</th><th>Now</th></tr>
+  <tr><td>rail gradient</td><td><span class="sw" style="background:var(--n3)"></span><code>03 → 01</code></td><td><code>#152543 → #0A111E</code></td></tr>
+  <tr><td><code>--chrome-side</code></td><td><span class="sw" style="background:var(--n5)"></span><code>05</code></td><td><code>#212c42</code></td></tr>
+  <tr><td><code>--card</code></td><td><span class="sw" style="background:var(--n2)"></span><code>02</code></td><td><code>#16181c</code> (neutral)</td></tr>
+  <tr><td><code>--list</code></td><td><span class="sw" style="background:var(--n2)"></span><code>02</code></td><td><code>#191b20</code> (neutral)</td></tr>
+  <tr><td><code>--read</code></td><td><span class="sw" style="background:var(--n1)"></span><code>01</code></td><td><code>#131519</code> (neutral)</td></tr>
+  <tr><td><code>--hairline</code></td><td><span class="sw" style="background:var(--n6)"></span><code>06</code></td><td><code>rgba(255,255,255,.06)</code></td></tr>
+  <tr><td>row hover</td><td><span class="sw" style="background:var(--n4)"></span><code>04</code></td><td><code>rgba(255,255,255,.04)</code></td></tr>
+  <tr><td><code>--text-lo</code></td><td><span class="sw" style="background:var(--n11)"></span><code>11</code></td><td><code>#93a2ba</code></td></tr>
+  <tr><td><code>--text-hi</code></td><td><span class="sw" style="background:var(--n12)"></span><code>12</code></td><td><code>#eef2f8</code></td></tr>
+  <tr><td>accent</td><td><span class="sw" style="background:var(--accent)"></span><code>#5AA9F0</code></td><td>unchanged</td></tr>
+</table>
+
+</body>
+</html>

@@ -1,0 +1,1291 @@
+/* BazMail.
+ *
+ * Three surfaces, all opaque: an L-shaped chrome of icon rail plus top bar
+ * (colour 1), the sidebar and the pane beside it (colour 2), and the content
+ * card floating on colour 2.
+ */
+
+:root {
+  /* ---- charcoal ramp -------------------------------------------------------
+   * Neutral charcoal at ~8% saturation on hue 220 — enough to keep it from
+   * going flat grey next to royal blue, not enough to read as blue itself.
+   *
+   * Lightness is spread 7% -> 21% across the surfaces. The previous scheme
+   * crammed five surfaces into 6-14% and they collapsed into each other; at
+   * these depths a 2% step is invisible, so the ramp has to be generous. */
+  --c1: #101113;  /* 7%  — reading pane, the deepest surface */
+  --c2: #151619;  /* 9%  — content card */
+  --c3: #1c1e21;  /* 12% — message list, and the rail's base */
+  --c4: #2c2f35;  /* 19% — the sidebar field, the lightest large surface */
+  --c5: #3c4048;  /* 26% — hairlines */
+  --c6: #4f545f;  /* 34% — stronger borders, inputs */
+
+  /* ---- gradients -----------------------------------------------------------
+   * Large surfaces only, never components, and always lighter at the top so
+   * every panel is lit from the same direction. The delta is ~4% lightness —
+   * enough to give a surface a top and a bottom, little enough that you notice
+   * it only by its absence. */
+  /* Every large surface is lit from the same direction and none of them bottoms
+   * out at the same value. The previous pass had the rail, the field, the list
+   * and the reading pane all converging on black, so the lower two-thirds of the
+   * window went flat — lit at the top, dead everywhere else.
+   *
+   * The ordering now holds at every height: field > list > reading pane, with
+   * the rail below the field throughout. */
+  --rail-surface: linear-gradient(180deg, #191b1f 0%, #0e0f12 100%);
+  --list-grad: linear-gradient(180deg, #15171c 0%, #0c0d11 100%);
+  --read-grad: linear-gradient(180deg, #111318 0%, #08090c 100%);
+  /* Colour 2 runs a rich deep navy at the top down to near-black at the foot.
+   * Hue holds at 220 throughout; saturation climbs to 65% at the top then falls
+   * away to almost nothing, while lightness drops 17% -> 3%. Near-black rather
+   * than true #000: pure black reads as a hole punched in the window, and gives
+   * the gradient no room to resolve its last few steps. */
+  --chrome-side-grad: linear-gradient(180deg, #0f2248 0%, #141b2b 50%, #10141c 100%);
+
+  --chrome-rail: var(--c3);
+  --chrome-side: #141b2b;
+
+  --card: #0d0f13;
+  --list: #12141a;
+  --read: #0d0f13;
+
+  --hairline: var(--c5);
+  --hairline-strong: var(--c6);
+  --raised: rgba(255, 255, 255, 0.045);
+
+  /* ---- text ----------------------------------------------------------------
+   * Neutral, matching the charcoal rather than tinted. --text-hi is a hair off
+   * pure white; #FFF on a dark ground glares. --text-lo clears 4.85:1 on the
+   * sidebar field, which is what those 11px labels need. */
+  --text-hi: #f8f9fb;
+  --text: #d4d7dd;
+  --text-mid: #a8adb6;
+  --text-lo: #969ca6;
+  --text-faint: #6e747e;
+
+  /* ---- royal blue ----------------------------------------------------------
+   * The only colour in the window. Everything above is charcoal, so this is the
+   * one thing that pulls the eye — which is the point. */
+  /* The bolt's gold, brought into the UI as the attention colour.
+   *
+   * This gives the window a rule rather than two accents competing: royal blue
+   * says *where you are* — selection, focus, the primary action. Gold says
+   * *what wants you* — unread, flagged, overdue. Nothing uses both. */
+  --gold: #efc118;
+  --gold-dim: #c9a326;
+  --gold-soft: rgba(239, 193, 24, 0.14);
+
+  --accent: #5b7cfa;
+  --accent-bright: #93a8ff;
+  --accent-fill: #3b5bdb;
+  --accent-grad: linear-gradient(180deg, #4a6ae8 0%, #3653cf 100%);
+  --accent-soft: rgba(91, 124, 250, 0.16);
+  --accent-sel: rgba(91, 124, 250, 0.24);
+  --warn: var(--gold);
+
+  --rail-width: 46px;
+  --sidebar-width: 236px;
+  --titlebar-height: 30px;
+
+  --radius-card: 10px;
+  --radius-row: 8px;
+  --radius-control: 8px;
+}
+
+/* Two chrome colours, and every surface is one of them.
+ *   Colour 1 (--chrome-rail): the icon rail and the top bar — one L-shaped surface.
+ *   Colour 2 (--chrome-side): the sidebar and the pane to its right.
+ * The content card sits opaque on colour 2.
+ *
+ * The window used to be transparent with a Windows 11 Acrylic backdrop behind
+ * the chrome. It looked good standing still and was a menace in use: DWM
+ * redraws it whenever anything moves behind the window, so the sidebar
+ * shimmered while you were trying to read a list. Removed rather than left
+ * switched off — a material system nobody uses is just weight. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--chrome-rail);
+}
+
+body {
+  font-family: -apple-system, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI",
+    system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text-hi);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* ---- shell ---------------------------------------------------------------- */
+
+.shell {
+  flex-grow: 1;
+  min-height: 0;
+  display: flex;
+}
+
+
+.rail {
+  width: var(--rail-width);
+  flex-shrink: 0;
+  /* No fill of its own: it reads .window's colour-1 gradient straight through,
+   * which is what lets the gradient run unbroken from the very top of the
+   * window to the bottom. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* The rail starts at the very top of the window, so its first icon has to be
+   * pushed past the caption strip to line up with the sidebar's first row.
+   * Tracks the caption height rather than hard-coding a number. */
+  padding: calc(var(--titlebar-height) + 12px) 0 12px;
+  gap: 3px;
+}
+
+.rail-item {
+  width: 34px;
+  height: 32px;
+  border-radius: var(--radius-control);
+  color: var(--text-lo);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rail-item.active {
+  background: var(--accent-sel);
+  color: var(--accent-bright);
+}
+
+.rail-spacer {
+  flex-grow: 1;
+}
+
+.avatar-me {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.13);
+  color: #cdd3da;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ---- sidebar -------------------------------------------------------------- */
+
+.sidebar {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  gap: 20px;
+  overflow-y: auto;
+}
+
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-lo);
+  padding: 0 8px 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  color: var(--text);
+  text-align: left;
+  width: 100%;
+}
+
+.sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-item.active {
+  background: var(--accent-sel);
+  color: var(--text-hi);
+  font-weight: 600;
+}
+
+.sidebar-item.nested {
+  padding-left: 24px;
+}
+
+.sidebar-item .grow {
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-count {
+  font-size: 12px;
+  color: var(--text-lo);
+}
+
+.sidebar-item.active .sidebar-count {
+  font-weight: 600;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ---- content card --------------------------------------------------------- */
+
+/* The card floats inside this with an even margin; the gap around it shows
+ * .main's colour 2. */
+.pane {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.card {
+  flex-grow: 1;
+  margin: 10px 10px 10px 0;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  display: flex;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--hairline-strong), 0 3px 16px rgba(0, 0, 0, 0.42);
+  min-width: 0;
+}
+
+.list {
+  width: 366px;
+  flex-shrink: 0;
+  background: var(--list-grad);
+  border-right: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pane-header {
+  height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.pane-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pane-sub {
+  font-size: 11px;
+  color: var(--text-lo);
+}
+
+.rows {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 10px 11px;
+  border-radius: var(--radius-row);
+  text-align: left;
+  width: 100%;
+}
+
+.row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.row.selected {
+  background: var(--accent-soft);
+}
+
+.row-unread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 11px;
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #2f3540;
+  color: #d4dae1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.row-main {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.row-sender {
+  flex-grow: 1;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row.unread .row-sender {
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.row-when {
+  font-size: 11px;
+  color: var(--text-lo);
+  flex-shrink: 0;
+}
+
+.row-subject,
+.row-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-subject {
+  color: #9aa2ab;
+}
+
+.row.unread .row-subject {
+  color: #d7dbe0;
+  font-weight: 500;
+}
+
+.row-preview {
+  font-size: 12px;
+  color: var(--text-lo);
+}
+
+/* ---- reader --------------------------------------------------------------- */
+
+.reader {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--read-grad);
+  min-width: 0;
+}
+
+.commandbar {
+  height: 52px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.search {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 31px;
+  padding: 0 11px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-control);
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.kbd {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 31px;
+  padding: 0 16px;
+  /* The label must never wrap: the height is fixed, so a second line overflows
+   * rather than growing the button. And it must not be squeezed by whatever sits
+   * beside it in a flex row — the text next to it should give way instead. */
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--accent-grad);
+  color: #fff;
+  border-radius: var(--radius-control);
+  font-weight: 600;
+  font-size: 12.5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.thread-header {
+  padding: 20px 26px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex-shrink: 0;
+}
+
+.thread-subject {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #f6f8fa;
+}
+
+.thread-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11.5px;
+  color: var(--text-lo);
+}
+
+.thread-meta .sep {
+  color: #454b52;
+}
+
+.body-frame {
+  flex-grow: 1;
+  min-height: 0;
+  margin: 0 26px 20px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.body-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+}
+
+.empty {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-lo);
+  text-align: center;
+  padding: 40px;
+}
+
+/* ---- first run ------------------------------------------------------------ */
+
+.setup {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.setup h2 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--text-hi);
+}
+
+.setup ol {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setup code {
+  font-family: "Cascadia Code", "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  padding: 2px 6px;
+  user-select: text;
+}
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 26px 12px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: rgba(224, 169, 74, 0.09);
+  border: 1px solid rgba(224, 169, 74, 0.24);
+  color: #e8dcc6;
+}
+
+.status-line {
+  padding: 8px 16px;
+  font-size: 11.5px;
+  color: var(--text-lo);
+  border-top: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+/* ---- custom caption -------------------------------------------------------- */
+
+/* The rail is a full-height column at the far left, and everything else — the
+ * caption, the sidebar, the pane — sits in a second column beside it. The rail
+ * therefore runs from the very top of the window rather than starting below a
+ * caption bar. */
+.window {
+  display: flex;
+  height: 100%;
+  background: var(--rail-surface);
+}
+
+/* Carries colour 2 for its whole column, so the caption strip, the sidebar and
+ * the pane are one continuous field with the card floating on it. */
+.main {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome-side-grad);
+}
+
+/* Transparent: it reads .main's colour 2 straight through, so there is no seam
+ * between the caption strip and the sidebar below it. */
+.titlebar {
+  height: var(--titlebar-height);
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  background: transparent;
+}
+
+.titlebar-drag {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.titlebar-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-lo);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+
+.win-controls {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+
+.win-btn {
+  width: 46px;
+  /* Explicit rather than relying on stretch: the hover fill has to run the full
+   * caption height or it reads as a floating chip instead of a caption button. */
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-mid);
+  transition: background 90ms linear, color 90ms linear;
+}
+
+.win-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text-hi);
+}
+
+.win-btn.close:hover {
+  /* Windows 11's own close-button red. */
+  background: #c42b1c;
+  color: #fff;
+}
+
+
+/* ---- sign-in form ---------------------------------------------------------- */
+
+.setup-note {
+  margin: 0;
+  color: var(--text-mid);
+  line-height: 1.6;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-lo);
+}
+
+.field-input {
+  height: 34px;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-hi);
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-control);
+  outline: none;
+  user-select: text;
+}
+
+.field-input:focus {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Prose sitting beside a button takes the leftover width and wraps, rather than
+   competing with the button for it. */
+.field-row .setup-aside {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-quiet {
+  height: 31px;
+  padding: 0 13px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-radius: var(--radius-control);
+  color: var(--text-mid);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.btn-quiet:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-hi);
+}
+
+.swatches {
+  display: flex;
+  gap: 8px;
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.swatch.selected {
+  box-shadow:
+    0 0 0 2px var(--read),
+    0 0 0 4px currentColor;
+}
+
+.field-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #f0c9c2;
+  background: rgba(196, 43, 28, 0.14);
+  border: 1px solid rgba(196, 43, 28, 0.32);
+  user-select: text;
+}
+
+/* The sign-in panel is the one place people need to select and type. */
+.setup input,
+.setup code,
+.field-error {
+  user-select: text;
+}
+
+.add-account {
+  margin-top: auto;
+  color: var(--text-lo);
+  font-size: 12.5px;
+}
+
+
+/* ---- scrollbars ------------------------------------------------------------ */
+
+/* WebView2 ships Windows' own light scrollbar, which is glaring in a dark app.
+ * The thumb is inset with a transparent border so it reads as a floating pill
+ * rather than a channel cut into the panel, and the track stays invisible. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* The wordmark. Height-driven so it scales with the caption rather than being
+   pinned to a pixel width. */
+/* Centred over the sidebar column rather than the whole window: the mark is
+ * given the sidebar's width and object-fit centres it inside that box, so it
+ * stays aligned to the column beneath it at any window size.
+ *
+ * The height is still set a little above the apparent cap height because the
+ * bolt overshoots the letters and defines the SVG's box. Since the artwork was
+ * rebalanced the box is 719 units rather than 751, so the same height now renders
+ * the lettering about 4% larger. */
+.titlebar-mark {
+  height: 19px;
+  width: var(--sidebar-width);
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+
+.setup-mark {
+  height: 42px;
+  width: auto;
+  display: block;
+  margin-bottom: 4px;
+  user-select: none;
+}
+
+.link-quiet {
+  display: inline-flex;
+  align-items: center;
+  height: 31px;
+  font-size: 12.5px;
+  color: var(--text-mid);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link-quiet:hover {
+  color: var(--text-hi);
+}
+
+/* A caveat under the main explanation — present, but not competing with it. */
+.setup-aside {
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+/* ---- provider picker ------------------------------------------------------- */
+
+.providers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 340px;
+  overflow-y: auto;
+  margin: 2px -6px;
+  padding: 0 6px;
+}
+
+.provider {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-row);
+  text-align: left;
+  width: 100%;
+  color: var(--text-mid);
+}
+
+.provider:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.provider.ready {
+  color: var(--text-hi);
+}
+
+.provider-name {
+  flex-grow: 1;
+  font-size: 13.5px;
+}
+
+.provider.ready .provider-name {
+  font-weight: 600;
+}
+
+.provider-method {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.provider-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
+  padding: 2px 7px;
+  flex-shrink: 0;
+}
+
+.provider-badge.ready {
+  color: var(--accent-bright);
+  background: var(--accent-soft);
+}
+
+/* A count only ever appears when something is unread, so it is an attention
+   signal — gold, not the selection blue. Dimmed, because a sidebar full of
+   bright numbers is noise rather than information. */
+.sidebar-count.unread {
+  color: var(--gold-dim);
+}
+
+.sidebar-item.active .sidebar-count.unread {
+  color: var(--gold);
+}
+
+/* The account header doubles as the fold control. */
+/* As a static heading this had no top padding and 7px at the bottom, which was
+ * fine when nothing was drawn behind it. With a highlight it pushed the text to
+ * the top of the box, so the vertical padding is even now and the gap that
+ * padding used to provide comes from the margin instead. */
+.sidebar-label.as-toggle {
+  width: 100%;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 3px;
+}
+
+.sidebar-label.as-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-mid);
+}
+
+.chevron {
+  flex-shrink: 0;
+  opacity: 0.55;
+  transition: transform 140ms ease;
+}
+
+.chevron.closed {
+  transform: rotate(-90deg);
+}
+
+/* ---- account menu ---------------------------------------------------------- */
+
+.avatar-menu-wrap {
+  position: relative;
+}
+
+button.avatar-me {
+  cursor: pointer;
+}
+
+button.avatar-me:hover,
+button.avatar-me.open {
+  background: var(--accent-sel);
+  color: var(--text-hi);
+}
+
+/* Opens up and to the right: the button sits at the bottom of a 46px rail, so
+   there is nowhere else for it to go. */
+.avatar-menu {
+  position: absolute;
+  bottom: 0;
+  left: calc(100% + 8px);
+  min-width: 190px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--chrome-side);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  z-index: 40;
+}
+
+.avatar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+}
+
+.avatar-menu-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-hi);
+}
+
+.avatar-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.avatar-menu-rule {
+  height: 1px;
+  background: var(--hairline);
+  margin: 4px 6px;
+}
+
+/* ---- account menu ---------------------------------------------------------- */
+
+.avatar-menu-wrap {
+  position: relative;
+}
+
+button.avatar-me {
+  cursor: pointer;
+}
+
+button.avatar-me:hover,
+button.avatar-me.open {
+  background: var(--accent-sel);
+  color: var(--text-hi);
+}
+
+/* Opens up and to the right: the button sits at the bottom of a 46px rail, so
+   there is nowhere else for it to go. */
+.avatar-menu {
+  position: absolute;
+  bottom: 0;
+  left: calc(100% + 8px);
+  min-width: 190px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--chrome-side);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  z-index: 40;
+}
+
+.avatar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+}
+
+.avatar-menu-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-hi);
+}
+
+.avatar-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.avatar-menu-rule {
+  height: 1px;
+  background: var(--hairline);
+  margin: 4px 6px;
+}
+
+/* ---- settings -------------------------------------------------------------- */
+
+/* Any panel that replaces the reading pane: a header that does not scroll, and
+   a body that does. */
+.panel {
+  flex-grow: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  flex-shrink: 0;
+  /* No bottom border on purpose: the command bar above already draws one, and a
+     second rule a few pixels below it reads as a mistake, not as structure. */
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-hi);
+}
+
+.panel-header-gap {
+  flex-grow: 1;
+}
+
+/* The body of a page. There are two shapes and only two: a long form that
+   scrolls from the top, and a short one that sits in the middle of the pane.
+   Screens pick one; nothing else about the layout is theirs to decide. */
+.panel-body {
+  flex-grow: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.panel-body.scroll {
+  padding: 6px 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.panel-body.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 28px 40px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-lo);
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border-radius: var(--radius-row);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--hairline);
+}
+
+.account-main {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.account-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.account-identity {
+  font-size: 11.5px;
+  color: var(--text-lo);
+}
+
+.account-warn {
+  font-size: 11.5px;
+  color: var(--warn);
+  text-align: right;
+  max-width: 190px;
+  line-height: 1.4;
+}
+
+.btn-danger {
+  height: 31px;
+  padding: 0 13px;
+  white-space: nowrap;
+  border-radius: var(--radius-control);
+  background: #c42b1c;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.btn-danger:hover {
+  background: #d8402f;
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 8px 20px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.facts dt {
+  color: var(--text-lo);
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.facts dd.path {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  word-break: break-all;
+  user-select: text;
+}
+
+.fact-warn {
+  color: var(--warn);
+  line-height: 1.5;
+}
+
+.panel-body kbd {
+  font-family: inherit;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+select.field-input {
+  cursor: pointer;
+}
+
+/* Sits in the panel header's flex row, so its position comes from the layout
+ * rather than from guessing which ancestor is a containing block. */
+.panel-back {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
+  color: var(--text-mid);
+  z-index: 5;
+}
+
+.panel-back:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-hi);
+}
+
+

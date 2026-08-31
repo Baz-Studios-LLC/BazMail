@@ -1,0 +1,65 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Glass" },
+    { "id": "page-2", "name": "Triage" },
+    { "id": "page-3", "name": "Earlier sketches" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html", "title": "BazMail — Inbox", "page": "page-1", "x": 0, "y": 0, "w": 1520, "h": 950 },
+    { "file": "Triage.dc.html", "title": "Needs you — with snooze open", "page": "page-2", "x": 0, "y": 0, "w": 1520, "h": 950 },
+    { "file": "WaitingOn.dc.html", "title": "Waiting on", "page": "page-2", "x": 1620, "y": 0, "w": 420, "h": 700 },
+    { "file": "DirectionB.dc.html", "title": "B — Warm Editorial", "page": "page-3", "x": 0, "y": 0, "w": 1440, "h": 900 },
+    { "file": "DirectionC.dc.html", "title": "C — Native Neutral", "page": "page-3", "x": 1580, "y": 0, "w": 1440, "h": 900 }
+  ],
+  "annotations": [
+    {
+      "id": "glass-note",
+      "page": "page-1",
+      "x": 0,
+      "y": -330,
+      "w": 900,
+      "text": "Vibrant translucent sidebar over the desktop; the content area is an opaque rounded card inset in the window with a hairline border and a soft shadow. The wallpaper behind the window is mocked in so the frosting has something to sample — in the real app that is the actual desktop.\n\nAccount provenance lives on the avatar ring — amber is example.com, green is example.net — because a rounded selection pill leaves nowhere for an edge bar. Unread stays a blue dot in the left gutter, which is the Apple convention and stops the two signals fighting.\n\nReal vibrancy on macOS, close on Windows 11 through Acrylic or Mica. On the web there is nothing behind the window, so it degrades to a solid sidebar — the layout and the text contrast both have to hold up either way."
+    },
+    {
+      "id": "loop",
+      "page": "page-2",
+      "x": 0,
+      "y": -400,
+      "w": 720,
+      "text": "THE LOOP\n\nj / k move, Enter opens, u back to the list.\n\ne archives and advances to the next thread in one keystroke. That is the whole loop: read, decide, e, the next one appears. You never go back to a list between messages.\n\ns snoozes, then a single key — 1 later today, 2 tomorrow, 3 this weekend, 4 next week, d pick a date. No calendar modal for the ninety percent case.\n\nr reply, a reply all, f forward, # delete, Tab accepts the ghost draft, ⌘K the command bar.\n\nArchive is ONE universal verb. Fastmail moves to a mailbox, Gmail drops the INBOX label, IMAP moves a folder — each adapter interprets it and you never see the difference. The mental model 'this is out of my inbox' is identical everywhere, so the lossiness is worth it. Per-account behaviour is visible in settings only, for anyone who cares."
+    },
+    {
+      "id": "trust",
+      "page": "page-2",
+      "x": 780,
+      "y": -400,
+      "w": 700,
+      "text": "WHY EACH THREAD IS HERE\n\nEvery row in Needs you carries its reason where the snippet normally sits — asked you a question, you promised Wednesday, addressed to you directly. In this lane the reason is more useful than the preview text, so the lane changes what the row emphasises.\n\nThis is the trust mechanism. A classifier that silently reorders your mail is frightening; one that shows its working is checkable. ! promotes a thread the classifier got wrong, and the correction is remembered for that sender.\n\nBright Insurance is the interesting row: a bulk sender that would normally be demoted to FYI, kept up here because it names a deadline. That residue is the only part AI actually adjudicates — List-Unsubscribe headers and no-reply addresses do most of the sorting mechanically, offline and for free."
+    },
+    {
+      "id": "waiting",
+      "page": "page-2",
+      "x": 1620,
+      "y": -250,
+      "w": 420,
+      "text": "WAITING ON\n\nThreads where you sent last and nobody replied, oldest first, ages past a week tinted. It populates and empties itself — a thread leaves the moment they answer, so there is nothing to file and nothing to maintain.\n\nNudge drafts a short follow-up in your voice rather than opening an empty composer.\n\nFor someone chasing clients this may be the most valuable view in the app, and almost nothing on the market builds it."
+    },
+    {
+      "id": "dir-b",
+      "page": "page-3",
+      "x": 0,
+      "y": -230,
+      "w": 620,
+      "text": "B — WARM EDITORIAL (superseded)\n\nWarm paper, Newsreader serif for subjects and body, terracotta accent, generous line-height.\n\nKept because its reading pane is still better than the glass version's. If long threads feel cramped once you are living in the app, this is where to steal from."
+    },
+    {
+      "id": "dir-c",
+      "page": "page-3",
+      "x": 1580,
+      "y": -230,
+      "w": 620,
+      "text": "C — NATIVE NEUTRAL (superseded)\n\nSystem fonts, system blue, standard control idioms. Deliberately unremarkable.\n\nKept as the contrast case: roughly what BazMail looks like if the glass is switched off and nothing replaces it."
+    }
+  ],
+  "launch": { "view": "canvas", "page": "page-2" }
+}
