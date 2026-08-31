@@ -109,6 +109,19 @@ pub struct Engine {
     /// Access tokens are short-lived; this avoids a refresh round trip on every
     /// single call. Keyed by account id, valid until the instant stored with it.
     access_tokens: tokio::sync::Mutex<HashMap<String, (String, Instant)>>,
+    /// Stored credentials, read from the OS store once per launch.
+    ///
+    /// Not an optimisation — a correctness fix on macOS. The Keychain asks the
+    /// user to authorise every read by an unsigned application, and Fastmail
+    /// rotates refresh tokens, so each refresh wrote a new credential and the
+    /// following read prompted again. The result was an endless run of password
+    /// dialogs that entering the password could not end, because each one was a
+    /// fresh question rather than a rejected answer.
+    ///
+    /// The exposure this adds is small: the same secret is already held in
+    /// memory for the duration of every call that uses it, and the access-token
+    /// cache above already makes exactly this trade.
+    credentials: tokio::sync::Mutex<HashMap<String, String>>,
 }
 
 /// What a sync actually did, so the UI can say something truthful rather than
@@ -134,6 +147,7 @@ impl Engine {
                 .build()?,
             clients: tokio::sync::Mutex::new(HashMap::new()),
             access_tokens: tokio::sync::Mutex::new(HashMap::new()),
+            credentials: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -230,9 +244,39 @@ impl Engine {
     /// For an API-token account this is just the stored credential. For an OAuth
     /// account the stored credential is a *refresh* token, and this trades it for
     /// a short-lived access token, caching that until shortly before it expires.
+    /// Reads a stored credential, holding it for the life of the process.
+    ///
+    /// See the `credentials` field for why this is not merely a speed-up.
+    async fn credential(&self, account: &AccountConfig) -> Result<String> {
+        if let Some(cached) = self.credentials.lock().await.get(&account.id) {
+            return Ok(cached.clone());
+        }
+        let token = account.resolve_token()?;
+        self.credentials
+            .lock()
+            .await
+            .insert(account.id.clone(), token.clone());
+        Ok(token)
+    }
+
+    /// Records a credential we just wrote, so the next use does not go back to
+    /// the OS store and ask the user about it again.
+    async fn remember_credential(&self, account_id: &str, token: &str) {
+        self.credentials
+            .lock()
+            .await
+            .insert(account_id.to_string(), token.to_string());
+    }
+
+    /// Drops a cached credential. Called when an account is removed, so a
+    /// re-added account never authenticates with the previous one's token.
+    async fn forget_credential(&self, account_id: &str) {
+        self.credentials.lock().await.remove(account_id);
+    }
+
     async fn access_token(&self, account: &AccountConfig) -> Result<String> {
         if !account.is_oauth() {
-            return account.resolve_token();
+            return self.credential(account).await;
         }
 
         if let Some((token, expires)) = self.access_tokens.lock().await.get(&account.id) {
@@ -245,8 +289,7 @@ impl Engine {
             .client_id
             .as_deref()
             .ok_or_else(|| anyhow!("account '{}' has no OAuth client id", account.id))?;
-        let refresh_token = secrets::load_token(&account.id)?
-            .ok_or_else(|| anyhow!("no credential stored for '{}' — sign in again", account.id))?;
+        let refresh_token = self.credential(account).await?;
 
         let endpoints = oauth::discover(&self.http, oauth::FASTMAIL_ISSUER).await?;
         let tokens = oauth::refresh(&self.http, &endpoints, client_id, &refresh_token).await?;
@@ -256,6 +299,7 @@ impl Engine {
         if let Some(rotated) = tokens.refresh_token.as_deref() {
             if rotated != refresh_token {
                 secrets::store_token(&account.id, rotated)?;
+                self.remember_credential(&account.id, rotated).await;
             }
         }
 
@@ -597,6 +641,7 @@ impl Engine {
             .to_string();
 
         secrets::store_token(&id, &refresh_token)?;
+        self.remember_credential(&id, &refresh_token).await;
 
         let account = Account {
             id: id.clone(),
@@ -682,6 +727,7 @@ impl Engine {
         }
 
         secrets::store_token(&id, &password)?;
+        self.remember_credential(&id, &password).await;
 
         let label = if label.trim().is_empty() {
             username
@@ -770,6 +816,7 @@ impl Engine {
     ) -> Result<()> {
         self.verify_token(&session_url, &token).await?;
         secrets::store_token(&id, &token)?;
+        self.remember_credential(&id, &token).await;
 
         self.mutate_config(|config| {
             config.upsert(AccountConfig {
@@ -794,6 +841,11 @@ impl Engine {
         self.mutate_config(|config| config.remove(account_id))?;
         secrets::delete_token(account_id)?;
         self.clients.lock().await.remove(account_id);
+        self.access_tokens.lock().await.remove(account_id);
+        // Otherwise an account re-added under the same id would authenticate
+        // with the removed one's token — which is exactly the case reconnecting
+        // hits, since ids are derived from the address.
+        self.forget_credential(account_id).await;
         Ok(())
     }
 }
