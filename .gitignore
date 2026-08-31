@@ -25,3 +25,4 @@ design/bazmail.html
 # from. It is scratch belonging to another tool, not to this repo.
 .consortium/
 .tmp-consortium-probe/
+.tmp-codex-schema/
