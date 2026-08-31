@@ -254,6 +254,12 @@ pub fn run() {
         .setup(|app| {
             // A failure here means the store could not be opened at all, which is
             // unrecoverable — better to die loudly than to run with no mirror.
+            // Desktop only: there is no updater on mobile, where the store
+            // owns installation.
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             let engine = Engine::new()?;
             app.manage(engine);
 

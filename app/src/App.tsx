@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Account, EmailBody, Envelope, Mailbox, Status } from "./types";
 import { Sidebar, type View } from "./components/Sidebar";
 import { MessageList } from "./components/MessageList";
@@ -276,6 +278,50 @@ export default function App() {
         : envelopes,
     [envelopes, unreadOnly, selectedId],
   );
+
+  // Updates the way Chrome does them: checked and fetched quietly in the
+  // background, applied when you next close the app. Nothing interrupts
+  // reading mail, and there is no dialog asking permission to do the thing you
+  // already asked for by installing it.
+  useEffect(() => {
+    let pending: Update | null = null;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const update = await check();
+        if (!update || cancelled) return;
+        await update.download();
+        pending = update;
+      } catch {
+        // A failed check is not worth reporting: offline, a rate limit, no
+        // release published yet. It tries again next launch, and in the
+        // meantime the copy you have works fine.
+      }
+    })();
+
+    const stopping = getCurrentWindow().onCloseRequested(async (event) => {
+      if (!pending) return;
+      event.preventDefault();
+
+      // Cleared before installing rather than after: if the installer fails,
+      // the next close has to actually close, not trap the window in a retry.
+      const update = pending;
+      pending = null;
+      try {
+        await update.install();
+      } catch {
+        // Nothing useful to do at exit. The download is kept and reapplied
+        // next time rather than being lost.
+      }
+      void getCurrentWindow().destroy();
+    });
+
+    return () => {
+      cancelled = true;
+      void stopping.then((stop) => stop());
+    };
+  }, []);
 
   // The triage loop: j / k move, e archives and advances, z undoes.
   useEffect(() => {

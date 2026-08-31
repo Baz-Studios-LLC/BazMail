@@ -116,6 +116,14 @@ jobs:
         id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # Signs the update manifest and artifacts. This is not code signing:
+          # it is the key installed copies check before accepting an update, so
+          # nobody who can spoof the endpoint can hand our users a binary. The
+          # build fails without it, which is the correct failure — shipping
+          # unsigned updater artifacts would be worse than shipping none.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           args: ${{ matrix.args }}
