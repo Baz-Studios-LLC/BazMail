@@ -16,6 +16,7 @@ pub mod oauth;
 pub mod secrets;
 pub mod smtp;
 pub mod store;
+pub mod vcard;
 
 pub use config::{account_id_from_address, AccountConfig, Config, ImapConfig};
 pub use model::{
