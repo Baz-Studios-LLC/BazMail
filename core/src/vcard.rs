@@ -14,6 +14,10 @@
 
 use std::collections::HashMap;
 
+// The line format itself is shared with iCalendar: same folding, same
+// parameters, same escaping. Written once so the two cannot disagree.
+use crate::contentline::{parse_property, split_escaped, unescape, unfold, Property};
+
 /// One address book entry, reduced to what a mail client needs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Contact {
@@ -48,162 +52,6 @@ pub struct Detail {
 pub struct Photo {
     pub media_type: String,
     pub data: Vec<u8>,
-}
-
-/// One property line, after unfolding.
-struct Property<'a> {
-    /// Lowercased, with any group prefix removed.
-    name: String,
-    /// Lowercased keys; values keep their case because labels are text.
-    params: HashMap<String, Vec<String>>,
-    /// The group this property belonged to, if any — Apple uses it to attach
-    /// an `X-ABLabel` to an address, and without it the label belongs to
-    /// nothing.
-    group: Option<String>,
-    value: &'a str,
-}
-
-/// Rejoins continuation lines.
-///
-/// A vCard may break a long line anywhere by starting the next one with a space
-/// or tab. Parsing without rejoining them splits a base64 photo into nonsense
-/// and truncates any address long enough to wrap.
-fn unfold(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for line in raw.split('\n') {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        match line.strip_prefix([' ', '\t']) {
-            Some(rest) if !out.is_empty() => out.push_str(rest),
-            _ => {
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                out.push_str(line);
-            }
-        }
-    }
-    out
-}
-
-/// Splits `group.NAME;PARAM=a,b;FLAG:value`.
-fn parse_property(line: &str) -> Option<Property<'_>> {
-    // The first unquoted colon ends the name and parameters. Quoted, because a
-    // parameter value may legitimately contain one.
-    let mut in_quotes = false;
-    let colon = line.char_indices().find(|(_, c)| {
-        match c {
-            '"' => {
-                in_quotes = !in_quotes;
-                false
-            }
-            ':' => !in_quotes,
-            _ => false,
-        }
-    })?;
-    let (head, value) = line.split_at(colon.0);
-    let value = &value[1..];
-
-    let mut parts = split_unquoted(head, ';');
-    let name_part = parts.next()?;
-
-    // A group prefix: item1.EMAIL. Only the last dot separates, because a group
-    // name may itself contain one.
-    let (group, name) = match name_part.rsplit_once('.') {
-        Some((g, n)) => (Some(g.to_ascii_lowercase()), n),
-        None => (None, name_part.as_str()),
-    };
-    if name.trim().is_empty() {
-        return None;
-    }
-
-    let mut params: HashMap<String, Vec<String>> = HashMap::new();
-    for part in parts {
-        // `TYPE=WORK` and a bare `PREF` both occur; 3.0 allows the shorthand.
-        let (key, raw) = match part.split_once('=') {
-            Some((k, v)) => (k.to_ascii_lowercase(), v.to_string()),
-            None => ("type".to_string(), part.clone()),
-        };
-        for one in split_unquoted(&raw, ',') {
-            let cleaned = one.trim_matches('"').trim().to_string();
-            if !cleaned.is_empty() {
-                params.entry(key.clone()).or_default().push(cleaned);
-            }
-        }
-    }
-
-    Some(Property {
-        name: name.trim().to_ascii_lowercase(),
-        params,
-        group,
-        value,
-    })
-}
-
-/// Splits on a separator that is not inside double quotes.
-fn split_unquoted(input: &str, sep: char) -> std::vec::IntoIter<String> {
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    for c in input.chars() {
-        match c {
-            '"' => {
-                in_quotes = !in_quotes;
-                current.push(c);
-            }
-            _ if c == sep && !in_quotes => out.push(std::mem::take(&mut current)),
-            _ => current.push(c),
-        }
-    }
-    out.push(current);
-    out.into_iter()
-}
-
-/// Splits a structured value on separators that are not escaped.
-///
-/// Order matters and is easy to get backwards: unescaping first turns an
-/// escaped semicolon into a real one, and the split then treats it as
-/// structure. That is how ORG:A\; B becomes A — a company name cut in half,
-/// with nothing to suggest anything was lost.
-fn split_escaped(value: &str, sep: char) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut chars = value.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            current.push(c);
-            if let Some(escaped) = chars.next() {
-                current.push(escaped);
-            }
-            continue;
-        }
-        if c == sep {
-            out.push(std::mem::take(&mut current));
-            continue;
-        }
-        current.push(c);
-    }
-    out.push(current);
-    out
-}
-
-/// Undoes the escaping a value carries: `\n`, `\,`, `\;`, `\\`.
-fn unescape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut chars = value.chars();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('n') | Some('N') => out.push('\n'),
-            // A trailing backslash is malformed; keeping it is friendlier than
-            // dropping the character before it.
-            Some(other) => out.push(other),
-            None => out.push('\\'),
-        }
-    }
-    out
 }
 
 fn is_preferred(params: &HashMap<String, Vec<String>>) -> bool {
