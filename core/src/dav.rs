@@ -80,6 +80,24 @@ pub struct Collection {
     pub tag: Option<String>,
 }
 
+/// One card or event, as the server holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resource {
+    /// Absolute URL. This is the thing a write targets.
+    pub url: String,
+    /// The server's version marker. Sent back as If-Match so an edit fails
+    /// loudly when someone changed the same card on another device, rather
+    /// than overwriting their change.
+    pub etag: Option<String>,
+    /// Exactly what the server sent, kept verbatim.
+    ///
+    /// Not a cache. A vCard holds far more than a mail client models —
+    /// postal addresses, birthdays, notes, a provider's own extensions — and
+    /// writing back a card regenerated from the parsed model would silently
+    /// drop every one of them. An edit has to change the lines it means to
+    /// and leave the rest of these bytes alone.
+    pub raw: String,
+}
 pub struct DavClient {
     http: reqwest::Client,
     base: Url,
@@ -250,6 +268,35 @@ impl DavClient {
         Ok(found)
     }
 
+    /// Everything in a collection, with its raw bytes and ETags.
+    ///
+    /// One request rather than a listing followed by a fetch per item: for a
+    /// first sync every item is wanted anyway, and a few hundred round trips
+    /// to discover that is worse than one large reply. Incremental sync is a
+    /// separate question and wants sync-collection instead.
+    pub async fn fetch_all(&self, collection: &str, kind: Kind) -> Result<Vec<Resource>> {
+        let body = match kind {
+            Kind::Contacts => format!(
+                r#"<card:addressbook-query xmlns:d="DAV:" xmlns:card="{ns}"><d:prop><d:getetag/><card:address-data/></d:prop></card:addressbook-query>"#,
+                ns = CARDDAV,
+            ),
+            // A calendar-query must carry a filter; without one the server is
+            // entitled to refuse. VEVENT only, so a Reminders list does not
+            // arrive dressed as a diary.
+            Kind::Calendars => format!(
+                r#"<cal:calendar-query xmlns:d="DAV:" xmlns:cal="{ns}"><d:prop><d:getetag/><cal:calendar-data/></d:prop><cal:filter><cal:comp-filter name="VCALENDAR"><cal:comp-filter name="VEVENT"/></cal:comp-filter></cal:filter></cal:calendar-query>"#,
+                ns = CALDAV,
+            ),
+        };
+
+        let xml = self.report(collection, "1", &body).await?;
+        let data_name = match kind {
+            Kind::Contacts => "address-data",
+            Kind::Calendars => "calendar-data",
+        };
+        Ok(parse_resources(&xml, &self.base, kind.namespace(), data_name))
+    }
+
     /// Resolves an href that may be a path, against this account's host.
     fn absolute(&self, href: &str) -> Result<Url> {
         self.base
@@ -258,6 +305,141 @@ impl DavClient {
     }
 }
 
+/// Writes everything in an account's collections to disk, exactly as the
+/// server holds it.
+///
+/// Made before any write path exists, and worth keeping afterwards. A backup
+/// taken by the same code that will later edit these records is the one that
+/// proves the records were readable in the first place — an export from the
+/// provider's own web interface tests nothing about this client.
+///
+/// Raw bytes and nothing derived. A backup written from a parsed model can
+/// only restore what the model understood, which is precisely the failure it
+/// exists to protect against.
+pub async fn back_up(client: &DavClient, kind: Kind, into: &std::path::Path) -> Result<Backup> {
+    let collections = client.discover(kind).await?;
+    std::fs::create_dir_all(into).with_context(|| format!("creating {}", into.display()))?;
+
+    let mut manifest = Vec::new();
+    let mut written = 0usize;
+
+    for collection in &collections {
+        let folder = into.join(safe_name(&collection.name));
+        std::fs::create_dir_all(&folder)
+            .with_context(|| format!("creating {}", folder.display()))?;
+
+        for resource in client.fetch_all(&collection.url, kind).await? {
+            let name = safe_name(&last_segment(
+                &Url::parse(&resource.url).unwrap_or_else(|_| client.base.clone()),
+            ));
+            let file = folder.join(&name);
+            std::fs::write(&file, resource.raw.as_bytes())
+                .with_context(|| format!("writing {}", file.display()))?;
+            written += 1;
+
+            manifest.push(serde_json::json!({
+                "collection": collection.name,
+                "url": resource.url,
+                "etag": resource.etag,
+                "file": format!("{}/{}", safe_name(&collection.name), name),
+            }));
+        }
+    }
+
+    // Without it a restore has bytes and nowhere to put them: the URL is what
+    // says which record each file is, and the ETag is what says which version.
+    let manifest_path = into.join("manifest.json");
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).context("building the manifest")?,
+    )
+    .with_context(|| format!("writing {}", manifest_path.display()))?;
+
+    Ok(Backup {
+        collections: collections.len(),
+        items: written,
+        path: into.to_path_buf(),
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct Backup {
+    pub collections: usize,
+    pub items: usize,
+    pub path: std::path::PathBuf,
+}
+
+/// Makes a server-chosen name safe to put on a filesystem.
+///
+/// Collection names come from the user and hrefs come from the server;
+/// neither is constrained to characters Windows will accept, and a backup
+/// that fails on one awkward name has backed up nothing.
+fn safe_name(input: &str) -> String {
+    let cleaned: String = input
+        .chars()
+        .map(|c| match c {
+            c if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' => c,
+            _ => '_',
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches(['.', '_']).to_string();
+    if trimmed.is_empty() {
+        "untitled".to_string()
+    } else {
+        trimmed
+    }
+}
+/// Reads a multistatus into resources, keeping only what the server said it
+/// actually has.
+fn parse_resources(
+    xml: &str,
+    base: &Url,
+    data_namespace: &str,
+    data_name: &str,
+) -> Vec<Resource> {
+    let Ok(doc) = roxmltree::Document::parse(xml) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for response in doc.descendants().filter(|n| n.has_tag_name((DAV, "response"))) {
+        let Some(href) = child_text(response, DAV, "href") else {
+            continue;
+        };
+        let Ok(url) = base.join(href.trim()) else {
+            continue;
+        };
+
+        let good = || {
+            response
+                .children()
+                .filter(|n| n.has_tag_name((DAV, "propstat")))
+                .filter(|propstat| propstat_succeeded(*propstat))
+                .flat_map(|propstat| propstat.descendants())
+        };
+
+        let Some(raw) = good()
+            .find(|n| n.has_tag_name((data_namespace, data_name)))
+            .and_then(|n| n.text())
+        else {
+            // No payload: the collection itself comes back in this listing,
+            // and so does anything the server declined to hand over.
+            continue;
+        };
+
+        let etag = good()
+            .find(|n| n.has_tag_name((DAV, "getetag")))
+            .and_then(|n| n.text())
+            .map(|t| t.trim().to_string());
+
+        out.push(Resource {
+            url: url.to_string(),
+            etag,
+            raw: raw.to_string(),
+        });
+    }
+    out
+}
 /// Whether a propstat reports success.
 ///
 /// A multistatus answers each property separately, and a server may return
@@ -362,6 +544,47 @@ mod tests {
         .unwrap()
     }
 
+    /// Takes a real backup of the iCloud account.
+    ///
+    /// Ignored: it reaches the network and uses the credential already in the
+    /// OS store. Run before anything in this client is allowed to write.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches iCloud with the stored credential"]
+    async fn backs_up_icloud() {
+        let password = crate::secrets::load_token("icloud").unwrap().unwrap();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let root = crate::config::Config::config_dir()
+            .expect("config dir")
+            .join("backups")
+            .join(format!("icloud-{stamp}"));
+
+        for (host, kind, folder) in [
+            ("https://contacts.icloud.com", Kind::Contacts, "contacts"),
+            ("https://caldav.icloud.com", Kind::Calendars, "calendars"),
+        ] {
+            let client = DavClient::new(
+                reqwest::Client::new(),
+                host,
+                "brettbazaar@icloud.com",
+                &password,
+            )
+            .expect("client");
+
+            let done = back_up(&client, kind, &root.join(folder))
+                .await
+                .unwrap_or_else(|e| panic!("{folder}: {e:#}"));
+            println!(
+                "{folder}: {} item(s) from {} collection(s) -> {}",
+                done.items,
+                done.collections,
+                done.path.display()
+            );
+            assert!(done.items > 0, "{folder}: nothing was backed up");
+        }
+    }
     /// Discovery against the real iCloud server.
     ///
     /// Ignored, because it needs an account and reaches the network. It reads
