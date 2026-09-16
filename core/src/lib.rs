@@ -1238,6 +1238,64 @@ pub struct VerifiedAccount {
 mod engine_tests {
     use super::*;
 
+    /// Does Fastmail's CardDAV accept the OAuth token we already hold?
+    ///
+    /// The answer decides whether contacts can come from the account that is
+    /// actually configured, or whether it needs an app password of its own.
+    /// Worth finding out rather than assuming in either direction.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches Fastmail with the stored credential"]
+    async fn what_does_fastmail_carddav_accept() {
+        let engine = Engine::new().expect("engine");
+        let account = {
+            let config = engine.config.read().unwrap();
+            config.accounts.iter().find(|a| a.id == "bazstudios").cloned()
+        }
+        .expect("bazstudios account");
+
+        let token = engine
+            .access_token(&account)
+            .await
+            .expect("an access token");
+        println!("token length {} (never printed)", token.len());
+
+        let url = "https://carddav.fastmail.com/dav/addressbooks";
+        let body = r#"<d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>"#;
+
+        for (label, request) in [
+            (
+                "bearer",
+                engine
+                    .http
+                    .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), url)
+                    .bearer_auth(&token),
+            ),
+            (
+                "basic with the token as password",
+                engine
+                    .http
+                    .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), url)
+                    .basic_auth(&account.identity, Some(&token)),
+            ),
+        ] {
+            let response = request
+                .header("Depth", "0")
+                .header("Content-Type", "application/xml")
+                .body(body)
+                .send()
+                .await;
+
+            match response {
+                Ok(r) => {
+                    let status = r.status();
+                    let text = r.text().await.unwrap_or_default();
+                    let principal = text.contains("current-user-principal") && text.contains("href");
+                    println!("{label}: {status}  principal found: {principal}");
+                }
+                Err(e) => println!("{label}: {e}"),
+            }
+        }
+    }
     /// Pulls the real address book into the real store.
     ///
     /// Ignored: it reaches the network and uses the credential already in
