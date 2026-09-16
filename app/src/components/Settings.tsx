@@ -10,6 +10,10 @@ interface SettingsProps {
   accounts: Account[];
   markReadDelay: number;
   onMarkReadDelayChange: (ms: number) => void;
+  /** Domains whose images load without asking. Verified domains only. */
+  imageDomains: string[];
+  /** Goes back to asking about a domain. */
+  onForgetImages: (domain: string) => void;
   onAddAccount: () => void;
   /** Renews an account's credential in place, keeping its id and settings. */
   onReconnect: (account: Account) => void;
@@ -51,6 +55,8 @@ export function Settings({
   accounts,
   markReadDelay,
   onMarkReadDelayChange,
+  imageDomains,
+  onForgetImages,
   onAddAccount,
   onReconnect,
   updateState,
@@ -283,11 +289,38 @@ export function Settings({
 
       {tab === "privacy" && (
         <section className="settings-section">
-          <p className="setup-note">
-            Remote images are blocked in every message, and each message offers
-            to load them once. Nothing is remembered between messages yet —
-            per-domain permissions will live here, and only for senders whose
-            domain the provider has actually verified.
+          <h3>Images</h3>
+          {imageDomains.length === 0 ? (
+            <p className="setup-note">
+              Remote images are blocked in every message, and each message
+              offers to load them once. Choose “Always from …” on a message and
+              that sender will appear here.
+            </p>
+          ) : (
+            <>
+              {imageDomains.map((domain) => (
+                <div className="allow-row" key={domain}>
+                  <span className="allow-domain">{domain}</span>
+                  <button
+                    className="btn-quiet"
+                    onClick={() => onForgetImages(domain)}
+                  >
+                    Ask again
+                  </button>
+                </div>
+              ))}
+              <p className="setup-aside">
+                Images load without asking for mail from these domains.
+              </p>
+            </>
+          )}
+          <p className="setup-aside">
+            {/* Stated because it is the whole reason the feature is safe, and
+                because a list of domains otherwise looks like a list of names
+                anyone could put in a From line. */}
+            Only senders whose domain your provider has verified can be added.
+            On a domain that passes those checks nobody else can send as that
+            domain, so the permission means what it appears to mean.
           </p>
         </section>
       )}

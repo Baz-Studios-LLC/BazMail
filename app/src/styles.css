@@ -1407,6 +1407,29 @@ button.avatar-me.open {
 /* Two choices now: this message, or this sender from now on. Side by side so
    the standing one reads as the larger commitment it is, rather than hiding in
    a menu where nobody would find it. */
+/* One allowed domain, with the way to undo it. Same shape as an account row
+   so the two read as the same kind of list. */
+.allow-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.allow-row:last-of-type {
+  border-bottom: none;
+}
+
+.allow-domain {
+  font-size: 13px;
+  color: var(--text-mid);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .images-bar-actions {
   display: flex;
   align-items: center;

@@ -701,6 +701,13 @@ export default function App() {
             <Settings
               status={status}
               accounts={accounts}
+              imageDomains={imageDomains}
+              onForgetImages={(domain) => {
+                setImageDomains((current) => current.filter((d) => d !== domain));
+                api
+                  .askAboutImagesFrom(domain)
+                  .catch((e) => setNote(`Could not forget that: ${e}`));
+              }}
               markReadDelay={markReadDelay}
               onMarkReadDelayChange={(ms) => {
                 setMarkReadDelay(ms);
