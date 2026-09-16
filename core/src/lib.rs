@@ -21,6 +21,7 @@ pub mod vcard;
 
 pub use config::{account_id_from_address, AccountConfig, Config, ImapConfig};
 pub use model::{
+    DavItem,
     Account, Connection, EmailAddress, EmailBody, Envelope, Lane, Mailbox, Mutation,
     Outgoing,
 };
@@ -289,6 +290,107 @@ impl Engine {
     /// Repaints an account. Provenance colour is the only way to tell two
     /// accounts apart at a glance in a unified list, so a collision makes the
     /// unified inbox unreadable — and until now nothing could fix one.
+    /// Brings an account's address book into the local store.
+    ///
+    /// Only accounts that authenticate with a password. A JMAP account signs in
+    /// with OAuth and there is no reason to assume its DAV endpoint takes the
+    /// same token — that has to be found out rather than guessed at, and
+    /// guessing wrong here means sending a bearer token to a host that did not
+    /// ask for one.
+    pub async fn sync_contacts(&self, account_id: &str) -> Result<usize> {
+        let account = {
+            let config = self.config.read().unwrap();
+            config
+                .accounts
+                .iter()
+                .find(|a| a.id == account_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("no account called '{account_id}'"))?
+        };
+
+        let Some(imap) = account.imap.clone() else {
+            anyhow::bail!(
+                "'{account_id}' signs in with OAuth; contacts for those accounts are not wired up yet"
+            );
+        };
+        let host = account
+            .dav_host(false)
+            .ok_or_else(|| anyhow!("no address book host known for '{account_id}'"))?;
+        let password = account.resolve_token()?;
+
+        let client = dav::DavClient::new(self.http.clone(), &host, &imap.username, &password)?;
+        let collections = client.discover(dav::Kind::Contacts).await?;
+
+        let mut stored = 0usize;
+        for collection in &collections {
+            let resources = client.fetch_all(&collection.url, dav::Kind::Contacts).await?;
+            let store = self.store.lock().unwrap();
+
+            for resource in resources {
+                // A card that cannot be read is still kept. The bytes are the
+                // record, and dropping one because this client did not
+                // understand it would lose a contact that every other client
+                // can see.
+                let contact = vcard::parse(&resource.raw);
+                let uid = contact
+                    .as_ref()
+                    .map(|c| c.uid.clone())
+                    .filter(|u| !u.is_empty())
+                    .unwrap_or_else(|| resource.url.clone());
+
+                let (name, search, details) = match &contact {
+                    Some(c) => {
+                        let addresses: Vec<&str> =
+                            c.emails.iter().map(|e| e.value.as_str()).collect();
+                        let search = format!("{} {}", c.name, addresses.join(" ")).to_lowercase();
+                        let details = serde_json::json!({
+                            "emails": c.emails.iter().map(|e| serde_json::json!({
+                                "value": e.value,
+                                "label": e.label,
+                                "preferred": e.preferred,
+                            })).collect::<Vec<_>>(),
+                            "phones": c.phones.iter().map(|p| serde_json::json!({
+                                "value": p.value,
+                                "label": p.label,
+                            })).collect::<Vec<_>>(),
+                            "organisation": c.organisation,
+                        });
+                        (c.name.clone(), search, details.to_string())
+                    }
+                    None => (String::new(), String::new(), "{}".to_string()),
+                };
+
+                store.put_dav_item(
+                    account_id,
+                    "contacts",
+                    &collection.url,
+                    &resource.url,
+                    &uid,
+                    resource.etag.as_deref(),
+                    &resource.raw,
+                    &name,
+                    &search,
+                    &details,
+                )?;
+                stored += 1;
+            }
+
+            store.put_dav_collection(
+                account_id,
+                "contacts",
+                &collection.url,
+                &collection.name,
+                collection.tag.as_deref(),
+            )?;
+        }
+        Ok(stored)
+    }
+
+    /// The address book as it stands locally.
+    pub fn contacts(&self, account_id: &str) -> Result<Vec<DavItem>> {
+        self.store.lock().unwrap().dav_items(account_id, "contacts")
+    }
+
     /// Domains allowed to load remote images without asking.
     pub fn image_domains(&self) -> Vec<String> {
         self.config.read().unwrap().image_domains.clone()
@@ -897,6 +999,7 @@ impl Engine {
                 signature: None,
                 client_id: Some(pending.client_id),
                 imap: None,
+                dav_host: None,
             })
         })?;
 
@@ -1007,6 +1110,7 @@ impl Engine {
                     smtp_host: None,
                     smtp_port: None,
                 }),
+                dav_host: None,
             })
         })?;
 
@@ -1074,6 +1178,7 @@ impl Engine {
                 signature: None,
                 client_id: None,
                 imap: None,
+                dav_host: None,
             })
         })?;
 
@@ -1127,4 +1232,48 @@ pub struct VerifiedAccount {
     pub account_name: String,
     pub suggested_id: String,
     pub suggested_label: String,
+}
+
+#[cfg(test)]
+mod engine_tests {
+    use super::*;
+
+    /// Pulls the real address book into the real store.
+    ///
+    /// Ignored: it reaches the network and uses the credential already in
+    /// the OS store. A backup of this account was taken before any of this
+    /// was written, and nothing here writes to the server.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches iCloud with the stored credential"]
+    async fn syncs_the_real_address_book() {
+        let engine = Engine::new().expect("engine");
+
+        let stored = engine.sync_contacts("icloud").await.expect("sync");
+        println!("stored {stored} card(s)");
+        assert!(stored > 0, "nothing came back");
+
+        let contacts = engine.contacts("icloud").expect("read back");
+        println!("read back {} contact(s)", contacts.len());
+
+        let named = contacts.iter().filter(|c| !c.display_name.is_empty()).count();
+        let with_email = contacts
+            .iter()
+            .filter(|c| c.search.contains("@"))
+            .count();
+        println!("  {named} have a name, {with_email} have an address");
+
+        for contact in contacts.iter().take(3) {
+            println!("   {:<26} {}", contact.display_name, contact.uid);
+        }
+
+        // The bytes are the record, and write-back depends on them.
+        assert!(
+            contacts.iter().all(|c| c.raw.contains("BEGIN:VCARD")),
+            "every row should hold the card the server sent"
+        );
+        assert!(
+            contacts.iter().filter(|c| c.etag.is_some()).count() > 0,
+            "ETags are what make a safe write possible"
+        );
+    }
 }

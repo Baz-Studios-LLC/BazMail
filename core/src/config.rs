@@ -44,6 +44,51 @@ pub struct AccountConfig {
     /// password rather than a token.
     #[serde(default)]
     pub imap: Option<ImapConfig>,
+    /// Where this account's contacts and calendars live, when it is not one of
+    /// the providers below.
+    ///
+    /// Almost always absent: the host is derivable from the mail server for
+    /// every provider seen so far, and asking someone for a second hostname to
+    /// set up an account they already set up is a poor trade for the rare case.
+    #[serde(default)]
+    pub dav_host: Option<String>,
+}
+
+impl AccountConfig {
+    /// The CardDAV or CalDAV host for this account.
+    ///
+    /// Derived from the mail server rather than asked for. iCloud keeps
+    /// contacts and calendars on separate hosts from mail, and Fastmail on a
+    /// third — the mapping is small, known, and better here than in a setup
+    /// form nobody can answer.
+    pub fn dav_host(&self, calendars: bool) -> Option<String> {
+        if let Some(explicit) = self.dav_host.as_ref().filter(|h| !h.trim().is_empty()) {
+            return Some(explicit.clone());
+        }
+
+        let mail_host = self.imap.as_ref().map(|i| i.host.to_lowercase())?;
+        if mail_host.contains("icloud") || mail_host.contains("me.com") {
+            return Some(
+                if calendars {
+                    "https://caldav.icloud.com"
+                } else {
+                    "https://contacts.icloud.com"
+                }
+                .to_string(),
+            );
+        }
+        if mail_host.contains("fastmail") || mail_host.contains("messagingengine") {
+            return Some(
+                if calendars {
+                    "https://caldav.fastmail.com"
+                } else {
+                    "https://carddav.fastmail.com"
+                }
+                .to_string(),
+            );
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,6 +361,7 @@ mod tests {
             signature: None,
             client_id: None,
             imap: None,
+            dav_host: None,
         }
     }
 
