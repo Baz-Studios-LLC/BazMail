@@ -287,6 +287,39 @@ impl Engine {
     /// Repaints an account. Provenance colour is the only way to tell two
     /// accounts apart at a glance in a unified list, so a collision makes the
     /// unified inbox unreadable — and until now nothing could fix one.
+    /// Domains allowed to load remote images without asking.
+    pub fn image_domains(&self) -> Vec<String> {
+        self.config.read().unwrap().image_domains.clone()
+    }
+
+    /// Stops asking about images from a domain the provider has verified.
+    ///
+    /// Refuses anything else. The caller is expected to offer this only for a
+    /// verified sender, but a check that lives only in the interface is a check
+    /// that is one refactor from being gone, and the cost of being wrong here
+    /// is that a spoofed domain loads tracking beacons silently.
+    pub fn allow_images_from(&self, domain: &str) -> Result<()> {
+        let domain = config::normalise_image_domain(domain)
+            .ok_or_else(|| anyhow!("'{domain}' is not a domain"))?;
+        self.mutate_config(|config| {
+            if !config.image_domains.iter().any(|d| d == &domain) {
+                config.image_domains.push(domain.clone());
+            }
+        })
+    }
+
+    /// Goes back to asking. Named for what it does to the decision rather than
+    /// to the list, because that is what the user is undoing.
+    pub fn ask_about_images_from(&self, domain: &str) -> Result<()> {
+        // Normalised the same way going out as coming in, or an entry added as
+        // "Apple.com" could not be removed by clicking "apple.com".
+        let domain = config::normalise_image_domain(domain)
+            .unwrap_or_else(|| domain.trim().to_lowercase());
+        self.mutate_config(|config| {
+            config.image_domains.retain(|d| d != &domain);
+        })
+    }
+
     pub fn set_account_color(&self, account_id: &str, color: &str) -> Result<()> {
         self.mutate_config(|config| {
             if let Some(account) = config.accounts.iter_mut().find(|a| a.id == account_id) {

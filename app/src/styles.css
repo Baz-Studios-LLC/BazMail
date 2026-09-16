@@ -1404,6 +1404,16 @@ button.avatar-me.open {
   color: var(--text-lo);
 }
 
+/* Two choices now: this message, or this sender from now on. Side by side so
+   the standing one reads as the larger commitment it is, rather than hiding in
+   a menu where nobody would find it. */
+.images-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .images-bar .btn-quiet {
   flex-shrink: 0;
   white-space: nowrap;

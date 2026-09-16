@@ -10,6 +10,10 @@ interface ReaderProps {
   loading: boolean;
   error: string | null;
   accounts: Account[];
+  /** Domains allowed to load images without asking. Verified domains only. */
+  imageDomains: string[];
+  /** Called with a verified domain the user wants to stop being asked about. */
+  onAllowImages: (domain: string) => void;
   /** `all` keeps the other recipients on the reply. */
   onReply: (all: boolean) => void;
 }
@@ -26,10 +30,13 @@ export function Reader({
   loading,
   error,
   accounts,
+  imageDomains,
+  onAllowImages,
   onReply,
 }: ReaderProps) {
   // Per message, and never remembered. An allow that outlives the message it
-  // was granted for is a decision the user did not make.
+  // was granted for is a decision the user did not make — unless the user
+  // asked for exactly that, below.
   const [loadImages, setLoadImages] = useState(false);
 
   useEffect(() => {
@@ -47,6 +54,15 @@ export function Reader({
 
   const account = accounts.find((a) => a.id === envelope.accountId);
   const hosts = body ? remoteImageHosts(body) : [];
+
+  // The standing permission is keyed to the domain the provider verified, not
+  // to the From address. A From header is free to write, so an allowance keyed
+  // on one would be inherited by anyone willing to type it, and the user's own
+  // allowlist would become the way in. A message that is not verified has no
+  // domain here, so it is never covered and never offers to be.
+  const verified = envelope.verifiedDomain;
+  const alwaysAllowed = !!verified && imageDomains.includes(verified);
+  const showImages = loadImages || alwaysAllowed;
 
   return (
     <>
@@ -88,7 +104,7 @@ export function Reader({
 
       {/* Named hosts rather than a generic warning: seeing a tracking domain
           spelled out is the information that makes the choice a real one. */}
-      {!loadImages && hosts.length > 0 && (
+      {!showImages && hosts.length > 0 && (
         <div className="images-bar">
           <ImageIcon size={16} className="images-bar-icon" />
           <div className="images-bar-text">
@@ -100,9 +116,27 @@ export function Reader({
               you are.
             </div>
           </div>
-          <button className="btn-quiet" onClick={() => setLoadImages(true)}>
-            Load images
-          </button>
+          <div className="images-bar-actions">
+            <button className="btn-quiet" onClick={() => setLoadImages(true)}>
+              Load images
+            </button>
+            {/* Offered only for a sender the provider vouched for. On an
+                unverified message this button would promise something it
+                cannot keep, so it is absent rather than disabled — a greyed
+                control invites a hunt for how to enable it. */}
+            {verified && (
+              <button
+                className="btn-quiet"
+                title={`Stop asking for mail that ${verified} is verified to have sent`}
+                onClick={() => {
+                  setLoadImages(true);
+                  onAllowImages(verified);
+                }}
+              >
+                Always from {verified}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -124,7 +158,7 @@ export function Reader({
           <iframe
             title="Message body"
             sandbox="allow-popups"
-            srcDoc={sandboxDocument(body, { loadRemoteImages: loadImages })}
+            srcDoc={sandboxDocument(body, { loadRemoteImages: showImages })}
             referrerPolicy="no-referrer"
           />
         ) : (

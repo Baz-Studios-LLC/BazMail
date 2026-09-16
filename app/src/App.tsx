@@ -50,6 +50,10 @@ export default function App() {
   const [bodyError, setBodyError] = useState<string | null>(null);
 
   const [note, setNote] = useState("Starting up…");
+  // Domains allowed to load images without asking. Verified domains only;
+  // the engine refuses anything else, so this cannot drift into a list of
+  // From addresses.
+  const [imageDomains, setImageDomains] = useState<string[]>([]);
   const [syncing, setSyncing] = useState(false);
   // Shown on first run, and whenever another account is being added.
   const [signingIn, setSigningIn] = useState(false);
@@ -162,6 +166,14 @@ export default function App() {
         const s = await api.status();
         setStatus(s);
         setAccounts(s.accounts);
+
+        // Before the first message can be opened: a reader that does not yet
+        // know a domain is allowed would block images the user already said to
+        // stop asking about, then load them a moment later.
+        await api
+          .imageDomains()
+          .then(setImageDomains)
+          .catch(() => setImageDomains([]));
 
         if (!s.configured) {
           setNote("No account configured yet.");
@@ -731,6 +743,17 @@ export default function App() {
               loading={bodyLoading}
               error={bodyError}
               accounts={accounts}
+              imageDomains={imageDomains}
+              onAllowImages={(domain) => {
+                // Applied locally first so the images appear on this message
+                // straight away; the write is what makes it outlast the app.
+                setImageDomains((current) =>
+                  current.includes(domain) ? current : [...current, domain],
+                );
+                api
+                  .allowImagesFrom(domain)
+                  .catch((e) => setNote(`Could not remember that: ${e}`));
+              }}
               onReply={(all) => selected && replyTo(selected, all)}
             />
           )}

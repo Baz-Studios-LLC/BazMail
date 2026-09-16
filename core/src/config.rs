@@ -125,11 +125,50 @@ impl AccountConfig {
     }
 }
 
+/// Accepts a domain for the image allowlist, or rejects it.
+///
+/// Separated from the config so the rule can be tested without an engine, and
+/// so there is one place that decides what goes in the list. The check is
+/// deliberately strict about what a domain is: entries here are compared
+/// against a provider's verdict, and something that is not a domain can never
+/// match one — it would sit in the list looking like protection that is not
+/// there.
+pub fn normalise_image_domain(input: &str) -> Option<String> {
+    let domain = input.trim().trim_matches('.').to_lowercase();
+    if domain.is_empty() || domain.len() > 253 {
+        return None;
+    }
+    // An address, not a domain: the caller passed a From rather than a verdict,
+    // which is the mistake this whole feature is shaped to avoid.
+    if domain.contains('@') || domain.contains(char::is_whitespace) {
+        return None;
+    }
+    if !domain.contains('.') {
+        return None;
+    }
+    let labelled = domain.split('.').all(|label| {
+        !label.is_empty()
+            && label
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    });
+    labelled.then_some(domain)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default)]
     pub accounts: Vec<AccountConfig>,
+    /// Domains whose remote images load without asking.
+    ///
+    /// Holds DMARC-verified domains only, never From addresses. A From header
+    /// is free to write, so an allowance keyed on one would be inherited by
+    /// anyone willing to type it — the allowlist would become the attack. On a
+    /// domain the provider verified, nobody else can put that domain in From,
+    /// so the entry means what it appears to mean. See `auth`.
+    #[serde(default)]
+    pub image_domains: Vec<String>,
 }
 
 impl Config {
@@ -234,6 +273,35 @@ pub fn account_id_from_address(address: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_address_is_not_a_domain() {
+        // The mistake the whole feature is shaped to avoid: allowing a From
+        // rather than a verified domain. Anyone can write a From.
+        assert_eq!(super::normalise_image_domain("news@apple.com"), None);
+        assert_eq!(super::normalise_image_domain("Apple <news@apple.com>"), None);
+    }
+
+    #[test]
+    fn a_domain_is_stored_one_way_however_it_is_typed() {
+        // An entry added as Apple.com must be removable by clicking
+        // apple.com, and must match a verdict that arrives lowercased.
+        assert_eq!(
+            super::normalise_image_domain("  Apple.COM. ").as_deref(),
+            Some("apple.com")
+        );
+    }
+
+    #[test]
+    fn things_that_cannot_match_a_verdict_are_refused() {
+        // Each of these would sit in the list looking like a decision that had
+        // been made, and never match anything.
+        assert_eq!(super::normalise_image_domain(""), None);
+        assert_eq!(super::normalise_image_domain("localhost"), None);
+        assert_eq!(super::normalise_image_domain("apple com"), None);
+        assert_eq!(super::normalise_image_domain("apple..com"), None);
+        assert_eq!(super::normalise_image_domain("*.apple.com"), None);
+    }
+
     use super::*;
 
     fn account(id: &str) -> AccountConfig {

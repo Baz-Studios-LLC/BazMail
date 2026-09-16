@@ -51,6 +51,11 @@ export const api = {
     // error: telling someone that is different from telling them to resend.
   }) => invoke<string | null>("send", { message }),
 
+  /** Domains whose images load without asking — DMARC-verified only. */
+  imageDomains: () => invoke<string[]>("image_domains"),
+  allowImagesFrom: (domain: string) => invoke<void>("allow_images_from", { domain }),
+  askAboutImagesFrom: (domain: string) => invoke<void>("ask_about_images_from", { domain }),
+
   markRead: (accountId: string, emailId: string, read: boolean) =>
     invoke<void>("mark_read", { accountId, emailId, read }),
 

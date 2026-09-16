@@ -222,11 +222,29 @@ fn set_account_color(
     engine.set_account_color(&account_id, &color).map_err(fail)
 }
 
+/// Domains whose remote images load without asking.
 #[tauri::command]
+fn image_domains(engine: State<'_, Engine>) -> CmdResult<Vec<String>> {
+    Ok(engine.image_domains())
+}
+
+/// Stops asking about images from a domain the provider verified.
+#[tauri::command]
+fn allow_images_from(engine: State<'_, Engine>, domain: String) -> CmdResult<()> {
+    engine.allow_images_from(&domain).map_err(fail)
+}
+
+/// Goes back to asking.
+#[tauri::command]
+fn ask_about_images_from(engine: State<'_, Engine>, domain: String) -> CmdResult<()> {
+    engine.ask_about_images_from(&domain).map_err(fail)
+}
+
 /// Returns a warning when the message went but its copy did not file.
 ///
 /// Not an error: the mail has left, and reporting it as a failure would tell
 /// someone to send it a second time.
+#[tauri::command]
 async fn send(engine: State<'_, Engine>, message: Outgoing) -> CmdResult<Option<String>> {
     engine.send(&message).await.map_err(fail)
 }
@@ -371,6 +389,9 @@ pub fn run() {
             set_account_color,
             move_account,
             send,
+            image_domains,
+            allow_images_from,
+            ask_about_images_from,
             mark_read,
             unarchive,
             trash,
