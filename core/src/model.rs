@@ -53,6 +53,30 @@ pub struct Mailbox {
     pub sort_order: u32,
 }
 
+/// One card or event held locally.
+///
+/// `raw` is the record and the parsed fields beside it are a convenience: a
+/// vCard carries more than this client models, so an edit rewrites those bytes
+/// in place rather than regenerating them from the fields below.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DavItem {
+    pub url: String,
+    pub uid: String,
+    /// The server's version of this item, sent back as If-Match on a write.
+    pub etag: Option<String>,
+    pub raw: String,
+    pub display_name: String,
+    /// Lowercased text the list searches against, built once on the way in.
+    pub search: String,
+    /// Kind-specific fields, as JSON: addresses for a contact, times for an
+    /// event. Kept opaque here so adding a field does not change this type.
+    pub details_json: String,
+    /// null, 'created', 'modified' or 'deleted' — a local change the server
+    /// has not accepted yet.
+    pub pending: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct EmailAddress {

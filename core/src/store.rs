@@ -8,7 +8,8 @@
 //! mapping described in the architecture notes lands with the second backend,
 //! since it only earns its keep once ids can collide across accounts.
 
-use crate::model::{Envelope, Mailbox, Mutation};
+use crate::model::{DavItem, Envelope, Mailbox, Mutation};
+use rusqlite::OptionalExtension;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
@@ -91,6 +92,53 @@ impl Store {
             -- Changes made locally that have not reached the server yet.
             -- Rows live only until the send succeeds; a row that keeps failing
             -- stays put with its error so it is visible rather than lost.
+            -- Address books and calendars, and how far each has been read.
+            --
+            -- The tag is the server's marker for 'anything changed in here';
+            -- holding it is what lets a later sync ask instead of refetching
+            -- a collection to find out.
+            CREATE TABLE IF NOT EXISTS dav_collections (
+                account_id   TEXT NOT NULL,
+                kind         TEXT NOT NULL,
+                url          TEXT NOT NULL,
+                name         TEXT NOT NULL,
+                tag          TEXT,
+                PRIMARY KEY (account_id, url)
+            );
+
+            -- One card or event.
+            --
+            -- `raw` is the server's own bytes and is the record; the parsed
+            -- columns beside it exist so the list can be drawn and searched
+            -- without reparsing everything. An edit rewrites the raw card in
+            -- place rather than regenerating it, because a vCard carries far
+            -- more than this client models and regenerating drops the rest.
+            --
+            -- `etag` is the server's version of this item, sent back as
+            -- If-Match so a write fails loudly when another device changed it.
+            --
+            -- `pending` is the local change not yet accepted by the server:
+            -- null, 'created', 'modified' or 'deleted'. Kept on the row rather
+            -- than in a separate queue so an item and its unsent change cannot
+            -- drift apart.
+            CREATE TABLE IF NOT EXISTS dav_items (
+                account_id      TEXT NOT NULL,
+                kind            TEXT NOT NULL,
+                collection_url  TEXT NOT NULL,
+                url             TEXT NOT NULL,
+                uid             TEXT NOT NULL,
+                etag            TEXT,
+                raw             TEXT NOT NULL,
+                display_name    TEXT NOT NULL DEFAULT '',
+                search          TEXT NOT NULL DEFAULT '',
+                details_json    TEXT NOT NULL DEFAULT '{}',
+                pending         TEXT,
+                updated_at      TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (account_id, url)
+            );
+
+            CREATE INDEX IF NOT EXISTS dav_items_by_kind
+                ON dav_items (account_id, kind);
             CREATE TABLE IF NOT EXISTS outbox (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id   TEXT NOT NULL,
@@ -120,6 +168,132 @@ impl Store {
         Ok(())
     }
 
+    /// Replaces what is known about a collection.
+    pub fn put_dav_collection(
+        &self,
+        account_id: &str,
+        kind: &str,
+        url: &str,
+        name: &str,
+        tag: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO dav_collections (account_id, kind, url, name, tag)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(account_id, url) DO UPDATE SET
+                 kind = ?2, name = ?4, tag = ?5",
+            params![account_id, kind, url, name, tag],
+        )?;
+        Ok(())
+    }
+
+    /// The marker last seen for a collection, if any.
+    pub fn dav_collection_tag(&self, account_id: &str, url: &str) -> Result<Option<String>> {
+        let tag = self
+            .conn
+            .query_row(
+                "SELECT tag FROM dav_collections WHERE account_id = ?1 AND url = ?2",
+                params![account_id, url],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        Ok(tag.flatten())
+    }
+
+    /// Stores an item as the server gave it.
+    ///
+    /// Deliberately refuses to overwrite a row carrying an unsent local
+    /// change. A sync that ran while an edit was waiting would otherwise
+    /// discard the edit and look like it had worked.
+    #[allow(clippy::too_many_arguments)]
+    pub fn put_dav_item(
+        &self,
+        account_id: &str,
+        kind: &str,
+        collection_url: &str,
+        url: &str,
+        uid: &str,
+        etag: Option<&str>,
+        raw: &str,
+        display_name: &str,
+        search: &str,
+        details_json: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO dav_items
+                 (account_id, kind, collection_url, url, uid, etag, raw,
+                  display_name, search, details_json, pending, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11)
+             ON CONFLICT(account_id, url) DO UPDATE SET
+                 kind = ?2, collection_url = ?3, uid = ?5, etag = ?6, raw = ?7,
+                 display_name = ?8, search = ?9, details_json = ?10, updated_at = ?11
+             WHERE dav_items.pending IS NULL",
+            params![
+                account_id,
+                kind,
+                collection_url,
+                url,
+                uid,
+                etag,
+                raw,
+                display_name,
+                search,
+                details_json,
+                now_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Items of one kind, for listing and searching.
+    ///
+    /// Anything marked deleted locally is left out: the row survives until the
+    /// server has been told, but showing it would mean a contact you deleted
+    /// reappearing until the next sync.
+    pub fn dav_items(&self, account_id: &str, kind: &str) -> Result<Vec<DavItem>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT url, uid, etag, raw, display_name, search, details_json, pending
+             FROM dav_items
+             WHERE account_id = ?1 AND kind = ?2
+               AND (pending IS NULL OR pending <> \'deleted\')
+             ORDER BY display_name COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map(params![account_id, kind], |row| {
+            Ok(DavItem {
+                url: row.get(0)?,
+                uid: row.get(1)?,
+                etag: row.get(2)?,
+                raw: row.get(3)?,
+                display_name: row.get(4)?,
+                search: row.get(5)?,
+                details_json: row.get(6)?,
+                pending: row.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Everything waiting to be sent to a server.
+    pub fn pending_dav_items(&self, account_id: &str) -> Result<Vec<DavItem>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT url, uid, etag, raw, display_name, search, details_json, pending
+             FROM dav_items
+             WHERE account_id = ?1 AND pending IS NOT NULL",
+        )?;
+        let rows = stmt.query_map(params![account_id], |row| {
+            Ok(DavItem {
+                url: row.get(0)?,
+                uid: row.get(1)?,
+                etag: row.get(2)?,
+                raw: row.get(3)?,
+                display_name: row.get(4)?,
+                search: row.get(5)?,
+                details_json: row.get(6)?,
+                pending: row.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
     /// Marks a message read or unread in the mirror.
     pub fn set_unread(&self, account_id: &str, email_id: &str, is_unread: bool) -> Result<()> {
         self.conn.execute(
@@ -482,6 +656,99 @@ mod tests {
         }
     }
 
+    fn put_card(store: &Store, url: &str, raw: &str) {
+        store
+            .put_dav_item(
+                "icloud",
+                "contacts",
+                "https://x/card/",
+                url,
+                "uid-1",
+                Some("etag-1"),
+                raw,
+                "Sarah Chen",
+                "sarah chen sarah@example.com",
+                "{}",
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_card_round_trips_with_its_bytes_and_etag() {
+        let store = Store::open_in_memory().unwrap();
+        put_card(&store, "https://x/card/1.vcf", "BEGIN:VCARD\nFN:Sarah Chen\nEND:VCARD");
+
+        let items = store.dav_items("icloud", "contacts").unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].etag.as_deref(), Some("etag-1"));
+        assert!(items[0].raw.contains("FN:Sarah Chen"), "the server bytes are the record");
+    }
+
+    #[test]
+    fn a_sync_does_not_overwrite_an_unsent_edit() {
+        // The property the whole two-way design rests on. A sync arriving
+        // while an edit is waiting must leave the edit alone: overwriting it
+        // loses work the user believes is saved, and does so silently.
+        let store = Store::open_in_memory().unwrap();
+        let url = "https://x/card/1.vcf";
+        put_card(&store, url, "BEGIN:VCARD\nFN:Original\nEND:VCARD");
+
+        store
+            .conn
+            .execute(
+                "UPDATE dav_items SET raw = ?1, pending = \'modified\' WHERE url = ?2",
+                params!["BEGIN:VCARD\nFN:My edit\nEND:VCARD", url],
+            )
+            .unwrap();
+
+        // The server's version arrives again, as a routine sync would.
+        put_card(&store, url, "BEGIN:VCARD\nFN:From the server\nEND:VCARD");
+
+        let items = store.dav_items("icloud", "contacts").unwrap();
+        assert!(items[0].raw.contains("My edit"), "the unsent edit survived");
+        assert_eq!(items[0].pending.as_deref(), Some("modified"));
+    }
+
+    #[test]
+    fn something_deleted_locally_stops_being_listed_but_stays_pending() {
+        // The row has to live until the server has been told, or the delete
+        // is forgotten. Listing it meanwhile would show a contact the user
+        // deleted, which reads as the delete having failed.
+        let store = Store::open_in_memory().unwrap();
+        let url = "https://x/card/1.vcf";
+        put_card(&store, url, "BEGIN:VCARD\nFN:Gone\nEND:VCARD");
+        store
+            .conn
+            .execute("UPDATE dav_items SET pending = \'deleted\' WHERE url = ?1", params![url])
+            .unwrap();
+
+        assert!(store.dav_items("icloud", "contacts").unwrap().is_empty());
+        let pending = store.pending_dav_items("icloud").unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].pending.as_deref(), Some("deleted"));
+    }
+
+    #[test]
+    fn a_collection_remembers_its_tag() {
+        // Without it every sync is a full fetch.
+        let store = Store::open_in_memory().unwrap();
+        store
+            .put_dav_collection("icloud", "contacts", "https://x/card/", "Contacts", Some("HK-1"))
+            .unwrap();
+        assert_eq!(
+            store.dav_collection_tag("icloud", "https://x/card/").unwrap().as_deref(),
+            Some("HK-1")
+        );
+
+        store
+            .put_dav_collection("icloud", "contacts", "https://x/card/", "Contacts", Some("HK-2"))
+            .unwrap();
+        assert_eq!(
+            store.dav_collection_tag("icloud", "https://x/card/").unwrap().as_deref(),
+            Some("HK-2"),
+            "a second sight of the collection updates the marker"
+        );
+    }
     #[test]
     fn an_old_mailbox_is_not_hidden_by_newer_mail_elsewhere() {
         // The bug this replaces: the query took the newest limit * 8
