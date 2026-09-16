@@ -1409,6 +1409,60 @@ button.avatar-me.open {
    a menu where nobody would find it. */
 /* One allowed domain, with the way to undo it. Same shape as an account row
    so the two read as the same kind of list. */
+/* The menu, wherever it is opened from. */
+.context-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 184px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--chrome-side);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-mid);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.context-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-hi);
+}
+
+.context-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.context-menu-item.danger:hover:not(:disabled) {
+  color: #ff8b8b;
+}
+
+/* A rule above, drawn on the item so the group it opens does not need a
+   wrapper element that exists only to hold a border. */
+.context-menu-item.separated {
+  margin-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 10px;
+}
+
+/* Ticked rows and the focused row are different things once more than one can
+   be ticked: the focus ring says which message the reader is showing. */
+.row.focused {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 .allow-row {
   display: flex;
   align-items: center;

@@ -10,6 +10,7 @@ import { Reader } from "./components/Reader";
 import { TitleBar } from "./components/TitleBar";
 import { SignIn } from "./components/SignIn";
 import { Settings } from "./components/Settings";
+import { ContextMenu, type MenuItem } from "./components/Menu";
 import { Compose, type Draft } from "./components/Compose";
 import { AvatarMenu } from "./components/AvatarMenu";
 import {
@@ -45,6 +46,15 @@ export default function App() {
   const [view, setView] = useState<View>(UNIFIED);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /// Everything ticked. `selectedId` stays the one the reader is showing:
+  /// ticking rows to act on them is a different question from which message
+  /// you are reading, and collapsing the two makes shift-click open mail.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  /// Where a shift-click measures from.
+  const anchorRef = useRef<string | null>(null);
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; ids: string[] } | null>(
+    null,
+  );
   const [body, setBody] = useState<EmailBody | null>(null);
   const [bodyLoading, setBodyLoading] = useState(false);
   const [bodyError, setBodyError] = useState<string | null>(null);
@@ -520,12 +530,24 @@ export default function App() {
   // The triage loop: j / k move, e archives and advances, z undoes.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
 
+      // Before the modifier guard below, which exists for the single-key
+      // triage shortcuts. Only meaningful once a message is selected: with
+      // nothing chosen, select-all belongs to whatever text is on screen.
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+        if (!selectedId || visibleEnvelopes.length === 0) return;
+        event.preventDefault();
+        setSelectedIds(new Set(visibleEnvelopes.map((e) => e.id)));
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
       if (event.key === "Escape") {
         setSelectedId(null);
+        setSelectedIds(new Set());
         setBody(null);
         return;
       }
@@ -578,6 +600,138 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [visibleEnvelopes, envelopes, selectedId, openMessage, archiveSelected, undoArchive, replyTo, trashSelected, toggleFlag, markUnread]);
+
+  const selectRow = useCallback(
+    (envelope: Envelope, mode: "replace" | "toggle" | "range") => {
+      if (mode === "toggle") {
+        setSelectedIds((current) => {
+          const next = new Set(current);
+          if (next.has(envelope.id)) next.delete(envelope.id);
+          else next.add(envelope.id);
+          return next;
+        });
+        anchorRef.current = envelope.id;
+        return;
+      }
+
+      if (mode === "range" && anchorRef.current) {
+        const ids = visibleEnvelopes.map((e) => e.id);
+        const from = ids.indexOf(anchorRef.current);
+        const to = ids.indexOf(envelope.id);
+        if (from >= 0 && to >= 0) {
+          const [lo, hi] = from < to ? [from, to] : [to, from];
+          setSelectedIds(new Set(ids.slice(lo, hi + 1)));
+          return;
+        }
+      }
+
+      // A plain click is the ordinary case and the only one that opens
+      // anything. Ticking rows must not load mail you did not ask to read,
+      // which would also mark it read on the way past.
+      anchorRef.current = envelope.id;
+      setSelectedIds(new Set([envelope.id]));
+      void openMessage(envelope);
+    },
+    [visibleEnvelopes, openMessage],
+  );
+
+  /// Applies an action to several messages.
+  ///
+  /// The list is updated first and the requests follow, matching what the
+  /// single-message actions already do: the engine has applied it to the local
+  /// mirror, so there is nothing to wait for. A failure says so rather than
+  /// silently leaving the list disagreeing with the server.
+  const actOn = useCallback(
+    async (
+      ids: string[],
+      change: (list: Envelope[]) => Envelope[],
+      request: (envelope: Envelope) => Promise<unknown>,
+    ) => {
+      const targets = envelopes.filter((e) => ids.includes(e.id));
+      if (targets.length === 0) return;
+      setEnvelopes(change);
+      setSelectedIds(new Set());
+
+      const failures: string[] = [];
+      for (const target of targets) {
+        try {
+          await request(target);
+        } catch (e) {
+          failures.push(String(e));
+        }
+      }
+      if (failures.length > 0) {
+        setNote(
+          failures.length === targets.length
+            ? failures[0]
+            : `${failures.length} of ${targets.length} did not apply: ${failures[0]}`,
+        );
+      }
+    },
+    [envelopes],
+  );
+
+  /// What right-clicking offers, for one message or for a whole selection.
+  const menuItems = useCallback(
+    (ids: string[]): MenuItem[] => {
+      const targets = envelopes.filter((e) => ids.includes(e.id));
+      const count = targets.length;
+      const many = count > 1 ? ` ${count} messages` : "";
+      // The action offered is the one that changes something: if any are
+      // unread, the useful verb is "read". Deciding per message instead would
+      // make one click both read and unread things.
+      const anyUnread = targets.some((e) => e.isUnread);
+      const anyUnflagged = targets.some((e) => !e.isFlagged);
+
+      return [
+        {
+          label: anyUnread ? `Mark${many || " as"} read` : `Mark${many || " as"} unread`,
+          onSelect: () =>
+            void actOn(
+              ids,
+              (list) =>
+                list.map((e) =>
+                  ids.includes(e.id) ? { ...e, isUnread: !anyUnread } : e,
+                ),
+              (e) => api.markRead(e.accountId, e.id, anyUnread),
+            ),
+        },
+        {
+          label: anyUnflagged ? `Flag${many}` : `Unflag${many}`,
+          onSelect: () =>
+            void actOn(
+              ids,
+              (list) =>
+                list.map((e) =>
+                  ids.includes(e.id) ? { ...e, isFlagged: anyUnflagged } : e,
+                ),
+              (e) => api.setFlagged(e.accountId, e.id, anyUnflagged),
+            ),
+        },
+        {
+          label: `Archive${many}`,
+          separated: true,
+          onSelect: () =>
+            void actOn(
+              ids,
+              (list) => list.filter((e) => !ids.includes(e.id)),
+              (e) => api.archive(e.accountId, e.id),
+            ),
+        },
+        {
+          label: `Delete${many}`,
+          danger: true,
+          onSelect: () =>
+            void actOn(
+              ids,
+              (list) => list.filter((e) => !ids.includes(e.id)),
+              (e) => api.trash(e.accountId, e.id),
+            ),
+        },
+      ];
+    },
+    [envelopes, actOn],
+  );
 
   const unreadTotal = envelopes.filter((e) => e.isUnread).length;
 
@@ -638,7 +792,18 @@ export default function App() {
           envelopes={visibleEnvelopes}
           accounts={accounts}
           selectedId={selectedId}
-          onSelect={(envelope) => void openMessage(envelope)}
+          selectedIds={selectedIds}
+          onSelect={selectRow}
+          onContextMenu={(envelope, at) => {
+            // Acting on a row outside the selection would apply the action to
+            // messages the pointer is nowhere near.
+            const ids = selectedIds.has(envelope.id) ? [...selectedIds] : [envelope.id];
+            if (!selectedIds.has(envelope.id)) {
+              setSelectedIds(new Set([envelope.id]));
+              anchorRef.current = envelope.id;
+            }
+            setMenu({ at, ids });
+          }}
           unreadOnly={unreadOnly}
           onToggleUnreadOnly={() => {
             const next = !unreadOnly;
@@ -766,6 +931,14 @@ export default function App() {
           )}
 
           <div className="status-line">{note}</div>
+
+          {menu && (
+            <ContextMenu
+              at={menu.at}
+              items={menuItems(menu.ids)}
+              onClose={() => setMenu(null)}
+            />
+          )}
           </section>
         </div>
       </div>

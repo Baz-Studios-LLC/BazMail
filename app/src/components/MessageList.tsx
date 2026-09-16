@@ -7,8 +7,12 @@ interface MessageListProps {
   title: string;
   envelopes: Envelope[];
   accounts: Account[];
+  /** The message the reader is showing, and the one j/k moves from. */
   selectedId: string | null;
-  onSelect: (envelope: Envelope) => void;
+  /** Everything ticked. Usually just the focused one. */
+  selectedIds: Set<string>;
+  onSelect: (envelope: Envelope, mode: "replace" | "toggle" | "range") => void;
+  onContextMenu: (envelope: Envelope, at: { x: number; y: number }) => void;
   unreadOnly: boolean;
   onToggleUnreadOnly: () => void;
 }
@@ -18,7 +22,9 @@ export function MessageList({
   envelopes,
   accounts,
   selectedId,
+  selectedIds,
   onSelect,
+  onContextMenu,
   unreadOnly,
   onToggleUnreadOnly,
 }: MessageListProps) {
@@ -59,16 +65,34 @@ export function MessageList({
 
       <div className="rows">
         {envelopes.map((envelope) => {
-          const selected = envelope.id === selectedId;
+          const focused = envelope.id === selectedId;
+          const selected = selectedIds.has(envelope.id);
           const ring = colors[envelope.accountId] ?? "transparent";
           return (
             <button
               key={`${envelope.accountId}:${envelope.id}`}
-              ref={selected ? selectedRef : undefined}
+              ref={focused ? selectedRef : undefined}
               className={`row ${selected ? "selected" : ""} ${
-                envelope.isUnread ? "unread" : ""
-              }`}
-              onClick={() => onSelect(envelope)}
+                focused ? "focused" : ""
+              } ${envelope.isUnread ? "unread" : ""}`}
+              onClick={(event) =>
+                onSelect(
+                  envelope,
+                  event.shiftKey
+                    ? "range"
+                    : event.ctrlKey || event.metaKey
+                      ? "toggle"
+                      : "replace",
+                )
+              }
+              // Right-clicking a message that is not in the selection acts on
+              // that message alone, which is what every list does: the
+              // alternative silently applies an action to rows the pointer is
+              // nowhere near.
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onContextMenu(envelope, { x: event.clientX, y: event.clientY });
+              }}
             >
               <span
                 className="row-unread-dot"
