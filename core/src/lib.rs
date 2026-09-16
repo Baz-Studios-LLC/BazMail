@@ -292,11 +292,11 @@ impl Engine {
     /// unified inbox unreadable — and until now nothing could fix one.
     /// Brings an account's address book into the local store.
     ///
-    /// Only accounts that authenticate with a password. A JMAP account signs in
-    /// with OAuth and there is no reason to assume its DAV endpoint takes the
-    /// same token — that has to be found out rather than guessed at, and
-    /// guessing wrong here means sending a bearer token to a host that did not
-    /// ask for one.
+    /// Only accounts that authenticate with a password, and that is a finding
+    /// rather than a caution. Fastmail's CardDAV was asked directly: it refuses
+    /// our OAuth token both as a bearer and as a basic password, 401 either way.
+    /// The scope requested at sign-in is mail only — the sign-in screen says so
+    /// — so contacts there need an app-specific password or a wider consent.
     pub async fn sync_contacts(&self, account_id: &str) -> Result<usize> {
         let account = {
             let config = self.config.read().unwrap();
@@ -1238,64 +1238,6 @@ pub struct VerifiedAccount {
 mod engine_tests {
     use super::*;
 
-    /// Does Fastmail's CardDAV accept the OAuth token we already hold?
-    ///
-    /// The answer decides whether contacts can come from the account that is
-    /// actually configured, or whether it needs an app password of its own.
-    /// Worth finding out rather than assuming in either direction.
-    #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "reaches Fastmail with the stored credential"]
-    async fn what_does_fastmail_carddav_accept() {
-        let engine = Engine::new().expect("engine");
-        let account = {
-            let config = engine.config.read().unwrap();
-            config.accounts.iter().find(|a| a.id == "bazstudios").cloned()
-        }
-        .expect("bazstudios account");
-
-        let token = engine
-            .access_token(&account)
-            .await
-            .expect("an access token");
-        println!("token length {} (never printed)", token.len());
-
-        let url = "https://carddav.fastmail.com/dav/addressbooks";
-        let body = r#"<d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>"#;
-
-        for (label, request) in [
-            (
-                "bearer",
-                engine
-                    .http
-                    .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), url)
-                    .bearer_auth(&token),
-            ),
-            (
-                "basic with the token as password",
-                engine
-                    .http
-                    .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), url)
-                    .basic_auth(&account.identity, Some(&token)),
-            ),
-        ] {
-            let response = request
-                .header("Depth", "0")
-                .header("Content-Type", "application/xml")
-                .body(body)
-                .send()
-                .await;
-
-            match response {
-                Ok(r) => {
-                    let status = r.status();
-                    let text = r.text().await.unwrap_or_default();
-                    let principal = text.contains("current-user-principal") && text.contains("href");
-                    println!("{label}: {status}  principal found: {principal}");
-                }
-                Err(e) => println!("{label}: {e}"),
-            }
-        }
-    }
     /// Pulls the real address book into the real store.
     ///
     /// Ignored: it reaches the network and uses the credential already in
