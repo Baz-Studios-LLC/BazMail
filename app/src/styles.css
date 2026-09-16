@@ -1463,6 +1463,125 @@ button.avatar-me.open {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* The rail holds buttons now that two of its items do something. Stripping
+   the platform button look keeps them identical to the ones that do not. */
+.rail-item {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+
+/* ---- contacts ---- */
+.contacts {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 0;
+  height: 100%;
+}
+
+.contacts-list {
+  border-right: 1px solid var(--hairline);
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 12px;
+}
+
+.contacts-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: calc(100% - 20px);
+  margin: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--chrome-side);
+  color: var(--text-hi);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.contact-row:hover { background: rgba(255, 255, 255, 0.04); }
+.contact-row.selected { background: rgba(255, 255, 255, 0.07); }
+
+.contact-row-main { min-width: 0; display: flex; flex-direction: column; }
+
+.contact-row-name {
+  font-size: 12.5px;
+  color: var(--text-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-row-sub {
+  font-size: 11px;
+  color: var(--text-lo);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contacts-detail { overflow-y: auto; min-height: 0; padding: 26px 30px; }
+
+.contact-card-name { font-size: 20px; font-weight: 600; color: var(--text-hi); }
+.contact-card-org { font-size: 13px; color: var(--text-lo); margin-top: 2px; }
+
+.contact-group { margin-top: 24px; }
+
+.contact-group-title {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--text-lo);
+  margin-bottom: 6px;
+}
+
+.contact-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.contact-line a { color: var(--accent-bright); text-decoration: none; }
+.contact-line a:hover { text-decoration: underline; }
+
+/* What the card called this address, when it called it anything. */
+.contact-tag {
+  font-size: 10px;
+  color: var(--text-lo);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* Accounts that could not sync, named. Silence here reads as 'you have no
+   contacts' rather than 'this account cannot do it yet'. */
+.contacts-problems {
+  border-top: 1px solid var(--hairline);
+  padding: 10px 16px;
+}
+
+.contacts-problem { font-size: 11.5px; color: var(--err); padding: 2px 0; }
+
 .allow-row {
   display: flex;
   align-items: center;

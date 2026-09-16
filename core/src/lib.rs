@@ -21,7 +21,7 @@ pub mod vcard;
 
 pub use config::{account_id_from_address, AccountConfig, Config, ImapConfig};
 pub use model::{
-    DavItem,
+    ContactSync, DavItem,
     Account, Connection, EmailAddress, EmailBody, Envelope, Lane, Mailbox, Mutation,
     Outgoing,
 };
@@ -389,6 +389,60 @@ impl Engine {
     /// The address book as it stands locally.
     pub fn contacts(&self, account_id: &str) -> Result<Vec<DavItem>> {
         self.store.lock().unwrap().dav_items(account_id, "contacts")
+    }
+
+    /// Every account's contacts together, sorted by name.
+    ///
+    /// Merged rather than shown per account: you look someone up by who they
+    /// are, not by which address book they happen to sit in. Which account a
+    /// card came from is still on the row for anyone who needs it.
+    pub fn all_contacts(&self) -> Result<Vec<DavItem>> {
+        let ids: Vec<String> = {
+            let config = self.config.read().unwrap();
+            config.accounts.iter().map(|a| a.id.clone()).collect()
+        };
+
+        let mut all = Vec::new();
+        for id in ids {
+            all.extend(self.contacts(&id)?);
+        }
+        all.sort_by(|a, b| {
+            a.display_name
+                .to_lowercase()
+                .cmp(&b.display_name.to_lowercase())
+        });
+        Ok(all)
+    }
+
+    /// Syncs every account that can, and says what happened to each.
+    ///
+    /// One account failing must not stop the others: an expired password on a
+    /// second account is no reason to have no contacts at all. Accounts that
+    /// cannot do this yet are reported rather than passed over in silence,
+    /// since 'no contacts' and 'not supported here' look identical otherwise.
+    pub async fn sync_all_contacts(&self) -> Result<Vec<ContactSync>> {
+        let accounts: Vec<AccountConfig> = {
+            let config = self.config.read().unwrap();
+            config.accounts.clone()
+        };
+
+        let mut outcomes = Vec::new();
+        for account in accounts {
+            let outcome = match self.sync_contacts(&account.id).await {
+                Ok(count) => ContactSync {
+                    account_id: account.id,
+                    stored: count,
+                    error: None,
+                },
+                Err(e) => ContactSync {
+                    account_id: account.id,
+                    stored: 0,
+                    error: Some(format!("{e:#}")),
+                },
+            };
+            outcomes.push(outcome);
+        }
+        Ok(outcomes)
     }
 
     /// Domains allowed to load remote images without asking.

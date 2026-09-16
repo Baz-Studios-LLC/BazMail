@@ -222,6 +222,20 @@ fn set_account_color(
     engine.set_account_color(&account_id, &color).map_err(fail)
 }
 
+/// Every account's contacts, as held locally.
+#[tauri::command]
+fn contacts(engine: State<'_, Engine>) -> CmdResult<Vec<bazmail_core::DavItem>> {
+    engine.all_contacts().map_err(fail)
+}
+
+/// Fetches contacts for every account that can, reporting each separately.
+#[tauri::command]
+async fn sync_contacts(
+    engine: State<'_, Engine>,
+) -> CmdResult<Vec<bazmail_core::ContactSync>> {
+    engine.sync_all_contacts().await.map_err(fail)
+}
+
 /// Domains whose remote images load without asking.
 #[tauri::command]
 fn image_domains(engine: State<'_, Engine>) -> CmdResult<Vec<String>> {
@@ -389,6 +403,8 @@ pub fn run() {
             set_account_color,
             move_account,
             send,
+            contacts,
+            sync_contacts,
             image_domains,
             allow_images_from,
             ask_about_images_from,

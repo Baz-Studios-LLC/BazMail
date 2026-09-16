@@ -3,13 +3,22 @@ import { api } from "./api";
 import { useUpdater } from "./useUpdater";
 import { announce } from "./notify";
 import { Resizer, clampListWidth, LIST_DEFAULT } from "./components/Resizer";
-import type { Account, EmailBody, Envelope, Mailbox, Status } from "./types";
+import type {
+  Account,
+  Contact,
+  ContactSync,
+  EmailBody,
+  Envelope,
+  Mailbox,
+  Status,
+} from "./types";
 import { Sidebar, type View } from "./components/Sidebar";
 import { MessageList } from "./components/MessageList";
 import { Reader } from "./components/Reader";
 import { TitleBar } from "./components/TitleBar";
 import { SignIn } from "./components/SignIn";
 import { Settings } from "./components/Settings";
+import { Contacts } from "./components/Contacts";
 import { ContextMenu, type MenuItem } from "./components/Menu";
 import { Compose, type Draft } from "./components/Compose";
 import { AvatarMenu } from "./components/AvatarMenu";
@@ -64,6 +73,10 @@ export default function App() {
   // the engine refuses anything else, so this cannot drift into a list of
   // From addresses.
   const [imageDomains, setImageDomains] = useState<string[]>([]);
+  const [showContacts, setShowContacts] = useState(false);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactsSyncing, setContactsSyncing] = useState(false);
+  const [contactOutcomes, setContactOutcomes] = useState<ContactSync[]>([]);
   const [syncing, setSyncing] = useState(false);
   // Shown on first run, and whenever another account is being added.
   const [signingIn, setSigningIn] = useState(false);
@@ -741,9 +754,22 @@ export default function App() {
         <div className="rail-item active">
           <MailIcon size={22} />
         </div>
-        <div className="rail-item">
+        <button
+          className={`rail-item ${showContacts ? "active" : ""}`}
+          title="Contacts"
+          aria-label="Contacts"
+          onClick={() => {
+            setShowSettings(false);
+            setSigningIn(false);
+            setShowContacts(true);
+            // Read from the store rather than the network: the fetch is a
+            // deliberate act behind the Sync button, so opening the tab is
+            // instant and does not touch anyone's server.
+            api.contacts().then(setContacts).catch((e) => setNote(String(e)));
+          }}
+        >
           <PeopleIcon size={22} />
-        </div>
+        </button>
         <div className="rail-item">
           <CalendarIcon size={22} />
         </div>
@@ -848,7 +874,27 @@ export default function App() {
             </button>
           </div>
 
-          {draft ? (
+          {showContacts ? (
+            <Contacts
+              contacts={contacts}
+              syncing={contactsSyncing}
+              outcomes={contactOutcomes}
+              onSync={() => {
+                setContactsSyncing(true);
+                api
+                  .syncContacts()
+                  .then(async (outcomes) => {
+                    setContactOutcomes(outcomes);
+                    setContacts(await api.contacts());
+                    const stored = outcomes.reduce((n, o) => n + o.stored, 0);
+                    setNote(`Contacts: ${stored} card(s).`);
+                  })
+                  .catch((e) => setNote(String(e)))
+                  .finally(() => setContactsSyncing(false));
+              }}
+              onClose={() => setShowContacts(false)}
+            />
+          ) : draft ? (
             <Compose
               accounts={accounts}
               draft={draft}

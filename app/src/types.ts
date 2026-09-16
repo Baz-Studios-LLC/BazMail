@@ -1,3 +1,55 @@
+/** One address book card, as held locally. */
+export interface Contact {
+  url: string;
+  uid: string;
+  etag: string | null;
+  /** The card exactly as the server sent it. Editing rewrites these bytes in
+   *  place rather than regenerating them, so fields this app does not model
+   *  survive a change made here. */
+  raw: string;
+  displayName: string;
+  search: string;
+  detailsJson: string;
+  /** null, 'created', 'modified' or 'deleted' — not yet accepted by the server. */
+  pending: string | null;
+}
+
+export interface ContactDetail {
+  value: string;
+  label: string;
+  preferred?: boolean;
+}
+
+export interface ContactDetails {
+  emails: ContactDetail[];
+  phones: ContactDetail[];
+  organisation: string | null;
+}
+
+export interface ContactSync {
+  accountId: string;
+  stored: number;
+  error: string | null;
+}
+
+/** Reads the details a contact carries, tolerating anything unexpected.
+ *
+ * The field is JSON built by the engine, so this should not fail — but a
+ * contact list that throws on one malformed row shows nothing at all, which
+ * is a poor trade for strictness about a field used only for display. */
+export function contactDetails(contact: Contact): ContactDetails {
+  try {
+    const parsed = JSON.parse(contact.detailsJson || '{}');
+    return {
+      emails: Array.isArray(parsed.emails) ? parsed.emails : [],
+      phones: Array.isArray(parsed.phones) ? parsed.phones : [],
+      organisation: parsed.organisation ?? null,
+    };
+  } catch {
+    return { emails: [], phones: [], organisation: null };
+  }
+}
+
 // Mirrors the serde shapes in bazmail-core. Kept hand-written rather than
 // generated: the surface is small, and a codegen step for six types would cost
 // more than it saves.

@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  Contact,
+  ContactSync,
   Account,
   ArchiveOutcome,
   EmailBody,
@@ -50,6 +52,11 @@ export const api = {
     // A string back means the message went and its copy did not file. Not an
     // error: telling someone that is different from telling them to resend.
   }) => invoke<string | null>("send", { message }),
+
+  /** Every account's contacts, merged and sorted by name. */
+  contacts: () => invoke<Contact[]>("contacts"),
+  /** Fetches from every account that can; each reports separately. */
+  syncContacts: () => invoke<ContactSync[]>("sync_contacts"),
 
   /** Domains whose images load without asking — DMARC-verified only. */
   imageDomains: () => invoke<string[]>("image_domains"),

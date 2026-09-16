@@ -53,6 +53,18 @@ pub struct Mailbox {
     pub sort_order: u32,
 }
 
+/// What happened when one account's contacts were synced.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactSync {
+    pub account_id: String,
+    pub stored: usize,
+    /// Why nothing came back, when nothing did. Carried rather than logged:
+    /// an account that cannot sync contacts should say so where the contacts
+    /// would have been.
+    pub error: Option<String>,
+}
+
 /// One card or event held locally.
 ///
 /// `raw` is the record and the parsed fields beside it are a convenience: a
