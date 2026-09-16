@@ -9,6 +9,7 @@
 pub mod at_rest;
 pub mod auth;
 pub mod config;
+pub mod dav;
 pub mod imap;
 pub mod jmap;
 pub mod model;
