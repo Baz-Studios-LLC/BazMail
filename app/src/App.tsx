@@ -764,9 +764,17 @@ export default function App() {
   return (
     <div className="window">
       <div className="rail">
-        <div className="rail-item active">
+        {/* Active when nothing else is. It was hardcoded active, so opening
+            another section lit two icons at once and neither said which one
+            you were in. */}
+        <button
+          className={`rail-item ${showContacts ? "" : "active"}`}
+          title="Mail"
+          aria-label="Mail"
+          onClick={() => setShowContacts(false)}
+        >
           <MailIcon size={22} />
-        </div>
+        </button>
         <button
           className={`rail-item ${showContacts ? "active" : ""}`}
           title="Contacts"
