@@ -11,6 +11,8 @@ interface SettingsProps {
   markReadDelay: number;
   onMarkReadDelayChange: (ms: number) => void;
   /** Domains whose images load without asking. Verified domains only. */
+  /** Why each account last failed, keyed by id. Empty when all is well. */
+  accountErrors: Record<string, string>;
   imageDomains: string[];
   /** Goes back to asking about a domain. */
   onForgetImages: (domain: string) => void;
@@ -55,6 +57,7 @@ export function Settings({
   accounts,
   markReadDelay,
   onMarkReadDelayChange,
+  accountErrors,
   imageDomains,
   onForgetImages,
   onAddAccount,
@@ -136,7 +139,14 @@ export function Settings({
 
         {accounts.map((account) => (
           <div className="account-row" key={account.id}>
-            <span className="dot" style={{ background: account.color }} />
+            {/* Red when the last sync failed, matching the sidebar. */}
+            <span
+              className="dot"
+              style={{
+                background: accountErrors[account.id] ? "var(--err)" : account.color,
+              }}
+              title={accountErrors[account.id]}
+            />
             <span className="account-main">
               <span className="account-label">{account.label}</span>
               <span className="account-identity">{account.identity}</span>

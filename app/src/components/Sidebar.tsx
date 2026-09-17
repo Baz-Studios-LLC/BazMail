@@ -11,6 +11,8 @@ export interface View {
 
 interface SidebarProps {
   accounts: Account[];
+  /** Why each account last failed, keyed by id. Empty when all is well. */
+  accountErrors: Record<string, string>;
   mailboxesByAccount: Record<string, Mailbox[]>;
   view: View;
   unreadTotal: number;
@@ -47,6 +49,7 @@ function loadCollapsed(): Set<string> {
 
 export function Sidebar({
   accounts,
+  accountErrors,
   mailboxesByAccount,
   view,
   unreadTotal,
@@ -120,7 +123,16 @@ export function Sidebar({
               }}
               aria-expanded={!isCollapsed}
             >
-              <span className="dot" style={{ background: account.color }} />
+              {/* Red when the last sync failed. An account's colour is how you
+                  find it; that it is broken is more urgent than which one it
+                  is, and the reason is on the tooltip. */}
+              <span
+                className="dot"
+                style={{
+                  background: accountErrors[account.id] ? "var(--err)" : account.color,
+                }}
+                title={accountErrors[account.id]}
+              />
               <span className="grow">{account.label}</span>
               {isCollapsed && accountUnread > 0 && (
                 <span className="sidebar-count unread">{accountUnread}</span>

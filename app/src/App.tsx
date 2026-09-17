@@ -73,6 +73,12 @@ export default function App() {
   // the engine refuses anything else, so this cannot drift into a list of
   // From addresses.
   const [imageDomains, setImageDomains] = useState<string[]>([]);
+  /// Why each account last failed, keyed by id.
+  ///
+  /// The sync already reports this per account and it was being thrown away,
+  /// which is exactly why a broken account has looked identical to a working
+  /// one — the app knew and had nowhere to say it.
+  const [accountErrors, setAccountErrors] = useState<Record<string, string>>({});
   const [showContacts, setShowContacts] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactsSyncing, setContactsSyncing] = useState(false);
@@ -214,6 +220,13 @@ export default function App() {
 
         setNote("Syncing…");
         const outcomes = await api.syncAll(200);
+        setAccountErrors(
+          Object.fromEntries(
+            outcomes
+              .filter((o) => !o.ok && o.error)
+              .map((o) => [o.accountId, o.error as string]),
+          ),
+        );
         const failed = outcomes.filter((o) => !o.ok);
         const synced = outcomes.reduce((n, o) => n + o.envelopes, 0);
 
@@ -795,6 +808,7 @@ export default function App() {
 
       <Sidebar
         accounts={accounts}
+        accountErrors={accountErrors}
         mailboxesByAccount={mailboxesByAccount}
         view={view}
         unreadTotal={unreadTotal}
@@ -912,6 +926,7 @@ export default function App() {
             <Settings
               status={status}
               accounts={accounts}
+              accountErrors={accountErrors}
               imageDomains={imageDomains}
               onForgetImages={(domain) => {
                 setImageDomains((current) => current.filter((d) => d !== domain));
