@@ -82,8 +82,18 @@ function clockOf(value: string | undefined) {
   return `${String(stamp.hour).padStart(2, "0")}:${String(stamp.minute).padStart(2, "0")}`;
 }
 
+/** `YYYYMMDD` for a local date, which is how days are keyed throughout. */
+function dayKey(year: number, month: number, day: number) {
+  return `${year}${String(month + 1).padStart(2, "0")}${String(day).padStart(2, "0")}`;
+}
+
 export function Calendar({ events, onSync, syncing, outcomes, onClose }: CalendarProps) {
   const [showPast, setShowPast] = useState(false);
+  const [view, setView] = useState<"agenda" | "month">("agenda");
+  const [cursor, setCursor] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
 
   const today = useMemo(() => {
     const now = new Date();
@@ -117,6 +127,44 @@ export function Calendar({ events, onSync, syncing, outcomes, onClose }: Calenda
     return out;
   }, [upcoming]);
 
+  // Indexed once per render rather than filtered per cell: a month draws
+  // forty-two of them, and scanning every event in each is the easy way to
+  // make a calendar feel slow.
+  const byDay = useMemo(() => {
+    const map = new Map<string, { event: Contact; detail: EventDetails }[]>();
+    for (const event of events) {
+      const detail = details(event);
+      const key = readStamp(detail.start)?.key;
+      if (!key) continue;
+      const list = map.get(key);
+      if (list) list.push({ event, detail });
+      else map.set(key, [{ event, detail }]);
+    }
+    // Within a day, earliest first; all-day events lead, which is how they
+    // are read.
+    for (const list of map.values()) {
+      list.sort((a, b) => (a.detail.start ?? "").localeCompare(b.detail.start ?? ""));
+    }
+    return map;
+  }, [events]);
+
+  const grid = useMemo(() => {
+    const first = new Date(cursor.year, cursor.month, 1);
+    const offset = first.getDay();
+    const length = new Date(cursor.year, cursor.month + 1, 0).getDate();
+    // Whole weeks, so the grid keeps its shape from month to month rather
+    // than jumping between five rows and six.
+    const cells = Math.ceil((offset + length) / 7) * 7;
+
+    return Array.from({ length: cells }, (_, i) => {
+      const day = i - offset + 1;
+      const inMonth = day >= 1 && day <= length;
+      return inMonth
+        ? { day, key: dayKey(cursor.year, cursor.month, day) }
+        : { day: null, key: null };
+    });
+  }, [cursor]);
+
   const failures = outcomes.filter((o) => o.error);
 
   return (
@@ -125,11 +173,104 @@ export function Calendar({ events, onSync, syncing, outcomes, onClose }: Calenda
       onBack={onClose}
       backLabel="Back to mail"
       actions={
-        <button className="btn-quiet" onClick={onSync} disabled={syncing}>
-          {syncing ? "Syncing…" : "Sync"}
-        </button>
+        <div className="field-row">
+          <button
+            className="btn-quiet"
+            onClick={() => setView(view === "agenda" ? "month" : "agenda")}
+          >
+            {view === "agenda" ? "Month" : "Agenda"}
+          </button>
+          <button className="btn-quiet" onClick={onSync} disabled={syncing}>
+            {syncing ? "Syncing…" : "Sync"}
+          </button>
+        </div>
       }
     >
+      {view === "month" && (
+        <div className="month">
+          <div className="month-bar">
+            <button
+              className="btn-quiet"
+              onClick={() =>
+                setCursor(({ year, month }) =>
+                  month === 0
+                    ? { year: year - 1, month: 11 }
+                    : { year, month: month - 1 },
+                )
+              }
+            >
+              ‹
+            </button>
+            <div className="month-title">
+              {MONTHS[cursor.month]} {cursor.year}
+            </div>
+            <button
+              className="btn-quiet"
+              onClick={() =>
+                setCursor(({ year, month }) =>
+                  month === 11
+                    ? { year: year + 1, month: 0 }
+                    : { year, month: month + 1 },
+                )
+              }
+            >
+              ›
+            </button>
+            <button
+              className="btn-quiet"
+              onClick={() => {
+                const now = new Date();
+                setCursor({ year: now.getFullYear(), month: now.getMonth() });
+              }}
+            >
+              Today
+            </button>
+          </div>
+
+          <div className="month-grid">
+            {DAYS.map((name) => (
+              <div className="month-weekday" key={name}>
+                {name.slice(0, 3)}
+              </div>
+            ))}
+
+            {grid.map((cell, i) => {
+              const rows = cell.key ? (byDay.get(cell.key) ?? []) : [];
+              return (
+                <div
+                  className={`month-cell ${cell.day ? "" : "outside"} ${
+                    cell.key === today ? "today" : ""
+                  }`}
+                  key={cell.key ?? `blank-${i}`}
+                >
+                  {cell.day && <div className="month-day">{cell.day}</div>}
+                  {rows.slice(0, 3).map(({ event, detail }) => (
+                    <div
+                      className={`month-event ${detail.cancelled ? "cancelled" : ""}`}
+                      key={event.url}
+                      title={event.displayName}
+                    >
+                      {!detail.allDay && clockOf(detail.start) && (
+                        <span className="month-event-time">
+                          {clockOf(detail.start)}
+                        </span>
+                      )}
+                      {event.displayName || "(no title)"}
+                    </div>
+                  ))}
+                  {/* Counted rather than crammed: a cell that scrolls is a cell
+                      nobody reads. */}
+                  {rows.length > 3 && (
+                    <div className="month-more">+{rows.length - 3} more</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {view === "agenda" && (
       <div className="agenda">
         {events.length === 0 && (
           <div className="empty" style={{ padding: 28 }}>
@@ -181,6 +322,7 @@ export function Calendar({ events, onSync, syncing, outcomes, onClose }: Calenda
           </div>
         ))}
       </div>
+      )}
 
       {failures.length > 0 && (
         <div className="contacts-problems">

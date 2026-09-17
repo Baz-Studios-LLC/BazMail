@@ -1538,6 +1538,76 @@ button.avatar-me.open {
 
 .agenda-past:hover { color: var(--text-mid); }
 
+/* The month grid, beside the agenda rather than instead of it: one answers
+   'what is next', the other 'what does the month look like', and they are
+   different questions. */
+.month { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+
+.month-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.month-title { font-size: 14px; font-weight: 600; color: var(--text-hi); min-width: 128px; }
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  /* Rows share what is left over, so the grid fills the pane instead of
+     leaving a gap under a five-week month. */
+  grid-auto-rows: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.month-weekday {
+  grid-row: 1;
+  padding: 6px 8px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-lo);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.month-cell {
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  padding: 4px 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.month-cell:nth-child(7n) { border-right: none; }
+
+/* Days from the months either side: present so the weeks line up, and quiet
+   enough not to be mistaken for this month. */
+.month-cell.outside { background: rgba(0, 0, 0, 0.16); }
+
+.month-cell.today { background: rgba(110, 168, 254, 0.08); }
+.month-cell.today .month-day { color: var(--accent-bright); font-weight: 700; }
+
+.month-day { font-size: 11px; color: var(--text-lo); padding: 1px 2px 3px; }
+
+.month-event {
+  font-size: 10.5px;
+  color: var(--text-mid);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.month-event-time { color: var(--text-lo); margin-right: 5px; font-family: var(--mono); }
+.month-event.cancelled { text-decoration: line-through; opacity: .6; }
+.month-more { font-size: 10px; color: var(--text-lo); padding: 0 5px; }
+
 /* ---- contacts ---- */
 .contacts {
   display: grid;
