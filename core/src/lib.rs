@@ -393,6 +393,149 @@ impl Engine {
         self.store.lock().unwrap().dav_items(account_id, "contacts")
     }
 
+    /// Brings an account's calendars into the local store.
+    ///
+    /// The same shape as contacts, and deliberately so: one discovery, one
+    /// fetch, the server's bytes kept beside what was read out of them. Only
+    /// the parser and the fields pulled out differ.
+    pub async fn sync_calendars(&self, account_id: &str) -> Result<usize> {
+        let account = {
+            let config = self.config.read().unwrap();
+            config
+                .accounts
+                .iter()
+                .find(|a| a.id == account_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("no account called '{account_id}'"))?
+        };
+
+        let Some(imap) = account.imap.clone() else {
+            anyhow::bail!(
+                "'{account_id}' signs in with OAuth; calendars for those accounts are not wired up yet"
+            );
+        };
+        let host = account
+            .dav_host(true)
+            .ok_or_else(|| anyhow!("no calendar host known for '{account_id}'"))?;
+        let password = account.resolve_token()?;
+
+        let client = dav::DavClient::new(self.http.clone(), &host, &imap.username, &password)?;
+        let collections = client.discover(dav::Kind::Calendars).await?;
+
+        let mut stored = 0usize;
+        for collection in &collections {
+            let resources = client.fetch_all(&collection.url, dav::Kind::Calendars).await?;
+            let store = self.store.lock().unwrap();
+
+            for resource in resources {
+                // One file can hold a series and its exceptions, so the first
+                // event names the row and the bytes keep all of them.
+                let events = ical::parse(&resource.raw);
+                let Some(event) = events.first() else {
+                    continue;
+                };
+
+                let start = event.start.as_ref();
+                let details = serde_json::json!({
+                    "start": start.map(|w| w.sort_key()),
+                    "end": event.end.as_ref().map(|w| w.sort_key()),
+                    "allDay": start.is_some_and(|w| w.is_all_day()),
+                    // Carried rather than resolved: turning a named zone into
+                    // an instant needs a zone database this crate does not
+                    // have, and guessing is wrong twice a year.
+                    "tzid": match start {
+                        Some(ical::When::Zoned { tzid, .. }) => Some(tzid.clone()),
+                        _ => None,
+                    },
+                    "location": event.location,
+                    "recurring": event.rrule.is_some(),
+                    "cancelled": event.cancelled,
+                    "calendar": collection.name,
+                });
+
+                let search = format!(
+                    "{} {}",
+                    event.summary,
+                    event.location.clone().unwrap_or_default()
+                )
+                .to_lowercase();
+
+                store.put_dav_item(
+                    account_id,
+                    "calendars",
+                    &collection.url,
+                    &resource.url,
+                    &event.uid,
+                    resource.etag.as_deref(),
+                    &resource.raw,
+                    &event.summary,
+                    &search,
+                    &details.to_string(),
+                )?;
+                stored += 1;
+            }
+
+            store.put_dav_collection(
+                account_id,
+                "calendars",
+                &collection.url,
+                &collection.name,
+                collection.tag.as_deref(),
+            )?;
+        }
+        Ok(stored)
+    }
+
+    /// Every account's events, soonest first.
+    ///
+    /// Sorted on the stored start, which orders correctly within a calendar
+    /// without claiming to be comparable across zones — see `ical::When`.
+    pub fn all_events(&self) -> Result<Vec<DavItem>> {
+        let ids: Vec<String> = {
+            let config = self.config.read().unwrap();
+            config.accounts.iter().map(|a| a.id.clone()).collect()
+        };
+
+        let mut all = Vec::new();
+        for id in ids {
+            all.extend(self.store.lock().unwrap().dav_items(&id, "calendars")?);
+        }
+
+        let key = |item: &DavItem| {
+            serde_json::from_str::<serde_json::Value>(&item.details_json)
+                .ok()
+                .and_then(|d| d.get("start").and_then(|s| s.as_str()).map(str::to_string))
+                .unwrap_or_default()
+        };
+        all.sort_by_key(key);
+        Ok(all)
+    }
+
+    /// Syncs every account's calendars, reporting each separately.
+    pub async fn sync_all_calendars(&self) -> Result<Vec<ContactSync>> {
+        let accounts: Vec<AccountConfig> = {
+            let config = self.config.read().unwrap();
+            config.accounts.clone()
+        };
+
+        let mut outcomes = Vec::new();
+        for account in accounts {
+            outcomes.push(match self.sync_calendars(&account.id).await {
+                Ok(count) => ContactSync {
+                    account_id: account.id,
+                    stored: count,
+                    error: None,
+                },
+                Err(e) => ContactSync {
+                    account_id: account.id,
+                    stored: 0,
+                    error: Some(format!("{e:#}")),
+                },
+            });
+        }
+        Ok(outcomes)
+    }
+
     /// Every account's contacts together, sorted by name.
     ///
     /// Merged rather than shown per account: you look someone up by who they

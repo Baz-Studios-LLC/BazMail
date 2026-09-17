@@ -19,6 +19,7 @@ import { TitleBar } from "./components/TitleBar";
 import { SignIn } from "./components/SignIn";
 import { Settings } from "./components/Settings";
 import { Contacts } from "./components/Contacts";
+import { Calendar } from "./components/Calendar";
 import { ContextMenu, type MenuItem } from "./components/Menu";
 import { Compose, type Draft } from "./components/Compose";
 import { AvatarMenu } from "./components/AvatarMenu";
@@ -79,10 +80,16 @@ export default function App() {
   /// which is exactly why a broken account has looked identical to a working
   /// one — the app knew and had nowhere to say it.
   const [accountErrors, setAccountErrors] = useState<Record<string, string>>({});
-  const [showContacts, setShowContacts] = useState(false);
+  /// Which section the rail is showing. One value rather than a flag each,
+  /// so two cannot be open at once — which is how the rail ended up lighting
+  /// both icons.
+  const [section, setSection] = useState<"mail" | "contacts" | "calendar">("mail");
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactsSyncing, setContactsSyncing] = useState(false);
   const [contactOutcomes, setContactOutcomes] = useState<ContactSync[]>([]);
+  const [events, setEvents] = useState<Contact[]>([]);
+  const [eventsSyncing, setEventsSyncing] = useState(false);
+  const [eventOutcomes, setEventOutcomes] = useState<ContactSync[]>([]);
   const [syncing, setSyncing] = useState(false);
   // Shown on first run, and whenever another account is being added.
   const [signingIn, setSigningIn] = useState(false);
@@ -768,21 +775,21 @@ export default function App() {
             another section lit two icons at once and neither said which one
             you were in. */}
         <button
-          className={`rail-item ${showContacts ? "" : "active"}`}
+          className={`rail-item ${section === "mail" ? "active" : ""}`}
           title="Mail"
           aria-label="Mail"
-          onClick={() => setShowContacts(false)}
+          onClick={() => setSection("mail")}
         >
           <MailIcon size={22} />
         </button>
         <button
-          className={`rail-item ${showContacts ? "active" : ""}`}
+          className={`rail-item ${section === "contacts" ? "active" : ""}`}
           title="Contacts"
           aria-label="Contacts"
           onClick={() => {
             setShowSettings(false);
             setSigningIn(false);
-            setShowContacts(true);
+            setSection("contacts");
             // Read from the store rather than the network: the fetch is a
             // deliberate act behind the Sync button, so opening the tab is
             // instant and does not touch anyone's server.
@@ -791,9 +798,21 @@ export default function App() {
         >
           <PeopleIcon size={22} />
         </button>
-        <div className="rail-item">
+        <button
+          className={`rail-item ${section === "calendar" ? "active" : ""}`}
+          title="Calendar"
+          aria-label="Calendar"
+          onClick={() => {
+            setShowSettings(false);
+            setSigningIn(false);
+            setSection("calendar");
+            // From the store, like contacts: opening a section should not
+            // reach anyone's server.
+            api.events().then(setEvents).catch((e) => setNote(String(e)));
+          }}
+        >
           <CalendarIcon size={22} />
-        </div>
+        </button>
         <div className="rail-spacer" />
         <AvatarMenu
           initials="BB"
@@ -896,7 +915,27 @@ export default function App() {
             </button>
           </div>
 
-          {showContacts ? (
+          {section === "calendar" ? (
+            <Calendar
+              events={events}
+              syncing={eventsSyncing}
+              outcomes={eventOutcomes}
+              onSync={() => {
+                setEventsSyncing(true);
+                api
+                  .syncCalendars()
+                  .then(async (outcomes) => {
+                    setEventOutcomes(outcomes);
+                    setEvents(await api.events());
+                    const stored = outcomes.reduce((n, o) => n + o.stored, 0);
+                    setNote(`Calendar: ${stored} event(s).`);
+                  })
+                  .catch((e) => setNote(String(e)))
+                  .finally(() => setEventsSyncing(false));
+              }}
+              onClose={() => setSection("mail")}
+            />
+          ) : section === "contacts" ? (
             <Contacts
               contacts={contacts}
               syncing={contactsSyncing}
@@ -914,7 +953,7 @@ export default function App() {
                   .catch((e) => setNote(String(e)))
                   .finally(() => setContactsSyncing(false));
               }}
-              onClose={() => setShowContacts(false)}
+              onClose={() => setSection("mail")}
             />
           ) : draft ? (
             <Compose

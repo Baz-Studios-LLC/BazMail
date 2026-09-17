@@ -58,6 +58,10 @@ export const api = {
   /** Fetches from every account that can; each reports separately. */
   syncContacts: () => invoke<ContactSync[]>("sync_contacts"),
 
+  /** Every account's events, soonest first. */
+  events: () => invoke<Contact[]>("events"),
+  syncCalendars: () => invoke<ContactSync[]>("sync_calendars"),
+
   /** Domains whose images load without asking — DMARC-verified only. */
   imageDomains: () => invoke<string[]>("image_domains"),
   allowImagesFrom: (domain: string) => invoke<void>("allow_images_from", { domain }),

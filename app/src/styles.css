@@ -1472,6 +1472,72 @@ button.avatar-me.open {
   font: inherit;
 }
 
+/* ---- calendar ---- */
+/* An agenda rather than a month grid: a mail client is asked what is next,
+   not what the shape of the month is, and a list costs a fraction of the
+   interface. */
+.agenda { overflow-y: auto; min-height: 0; padding: 18px 26px 28px; }
+
+.agenda-day { margin-bottom: 20px; }
+
+.agenda-heading {
+  position: sticky;
+  top: 0;
+  background: var(--chrome-mid, var(--chrome-side));
+  padding: 6px 0;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-lo);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.agenda-row { display: flex; gap: 14px; padding: 9px 0; align-items: baseline; }
+
+/* Fixed width so the summaries line up and the eye can run down the times. */
+.agenda-when {
+  flex: none;
+  width: 62px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-mid);
+}
+
+.agenda-what { min-width: 0; }
+.agenda-summary { font-size: 13px; color: var(--text-hi); display: flex; align-items: center; gap: 7px; }
+.agenda-where { font-size: 11.5px; color: var(--text-lo); margin-top: 1px; }
+
+/* The zone the event was written in, shown because the time beside it is the
+   wall time there rather than here. */
+.agenda-zone { font-size: 10.5px; color: var(--text-lo); margin-top: 1px; font-family: var(--mono); }
+
+.agenda-tag {
+  font-size: 10px;
+  color: var(--text-lo);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* Still listed, and visibly not happening. */
+.agenda-row.cancelled .agenda-summary { text-decoration: line-through; color: var(--text-lo); }
+
+.agenda-past {
+  display: block;
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 7px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 8px;
+  background: none;
+  color: var(--text-lo);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.agenda-past:hover { color: var(--text-mid); }
+
 /* ---- contacts ---- */
 .contacts {
   display: grid;
